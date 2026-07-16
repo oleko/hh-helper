@@ -1,0 +1,79 @@
+{% extends "base.html" %}
+{% block title %}Статистика — hh-helper{% endblock %}
+{% block content %}
+<h2>Вакансий по дням</h2>
+{% if not days %}
+<p>Пока нет данных — ещё не было ни одного <code>fetch</code>.</p>
+{% else %}
+{% set max_count = days | map(attribute="count") | max %}
+<div class="chart-wrap">
+<svg viewBox="0 0 {{ days|length * 32 }} 170" width="{{ days|length * 32 }}" height="170"
+     style="min-width:100%; display:block;">
+  <line x1="0" y1="140" x2="{{ days|length * 32 }}" y2="140" stroke="#ddd" stroke-width="1"></line>
+  {% for d in days %}
+  {% set h = (d.count / max_count * 110) | round(1) %}
+  {% set x = loop.index0 * 32 %}
+  <rect x="{{ x + 6 }}" y="{{ 140 - h }}" width="20" height="{{ h if h > 1 else 1 }}" rx="3" fill="#0b5fff"></rect>
+  <text x="{{ x + 16 }}" y="{{ 133 - h }}" font-size="10" text-anchor="middle" fill="#1a1a1a">{{ d.count }}</text>
+  <text x="{{ x + 16 }}" y="155" font-size="9" text-anchor="middle" fill="#666">{{ d.day[5:] }}</text>
+  {% endfor %}
+</svg>
+</div>
+<p style="color:#666; font-size:0.85rem;">
+  По дню первого обнаружения — сколько новых вакансий пришло за день. Уже виденные
+  вакансии повторно не считаются, так что старые столбцы со временем не меняются.
+</p>
+{% endif %}
+
+<h2>Зарплата</h2>
+{% if not salary_stats %}
+<p>Пока нет вакансий с указанной зарплатой в рублях.</p>
+{% else %}
+<div class="chart-wrap">
+  <p style="margin:0;"><strong>Средняя:</strong> {{ salary_stats.avg }} ₽
+     &nbsp;·&nbsp; <strong>Медиана:</strong> {{ salary_stats.median }} ₽</p>
+  <p style="margin:0.4rem 0 0; color:#666; font-size:0.85rem;">
+    По {{ salary_stats.count }} вакансиям, где HH указал зарплату в рублях
+    (если указана и вилка «от–до» — берём середину; другие валюты не считаем,
+    чтобы не смешивать).
+  </p>
+</div>
+
+{% set max_bucket = salary_buckets | map(attribute="count") | max %}
+<div class="chart-wrap" style="margin-top:1rem;">
+<svg viewBox="0 0 {{ salary_buckets|length * 56 }} 170" width="{{ salary_buckets|length * 56 }}" height="170"
+     style="min-width:100%; display:block;">
+  <line x1="0" y1="140" x2="{{ salary_buckets|length * 56 }}" y2="140" stroke="#ddd" stroke-width="1"></line>
+  {% for b in salary_buckets %}
+  {% set h = (b.count / max_bucket * 110) | round(1) %}
+  {% set x = loop.index0 * 56 %}
+  <rect x="{{ x + 8 }}" y="{{ 140 - h }}" width="30" height="{{ h if h > 1 else 1 }}" rx="3" fill="#0b5fff"></rect>
+  <text x="{{ x + 23 }}" y="{{ 133 - h }}" font-size="10" text-anchor="middle" fill="#1a1a1a">{{ b.count }}</text>
+  <text x="{{ x + 23 }}" y="155" font-size="9" text-anchor="middle" fill="#666">{{ b.label }}</text>
+  {% endfor %}
+</svg>
+</div>
+<p style="color:#666; font-size:0.85rem;">Распределение по вилкам в 50 тыс. ₽.</p>
+
+{% if salary_weekly and salary_weekly|length > 1 %}
+{% set max_week_avg = salary_weekly | map(attribute="avg") | max %}
+<h3>Динамика по неделям</h3>
+<div class="chart-wrap">
+<svg viewBox="0 0 {{ salary_weekly|length * 56 }} 170" width="{{ salary_weekly|length * 56 }}" height="170"
+     style="min-width:100%; display:block;">
+  <line x1="0" y1="140" x2="{{ salary_weekly|length * 56 }}" y2="140" stroke="#ddd" stroke-width="1"></line>
+  {% for w in salary_weekly %}
+  {% set h = (w.avg / max_week_avg * 110) | round(1) %}
+  {% set x = loop.index0 * 56 %}
+  <rect x="{{ x + 8 }}" y="{{ 140 - h }}" width="30" height="{{ h if h > 1 else 1 }}" rx="3" fill="#0b5fff"></rect>
+  <text x="{{ x + 23 }}" y="{{ 133 - h }}" font-size="10" text-anchor="middle" fill="#1a1a1a">{{ w.avg_display }}</text>
+  <text x="{{ x + 23 }}" y="155" font-size="9" text-anchor="middle" fill="#666">{{ w.week[6:] }}</text>
+  {% endfor %}
+</svg>
+</div>
+<p style="color:#666; font-size:0.85rem;">
+  Средняя зарплата вакансий по неделе их первого обнаружения (ISO-неделя, номер под столбцом).
+</p>
+{% endif %}
+{% endif %}
+{% endblock %}

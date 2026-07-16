@@ -1,0 +1,71 @@
+# Конфигурация hh-helper — скопируй в config.yaml и настрой под себя:
+#   cp config.example.yaml config.yaml
+# Секретные ключи сюда НЕ вписывай — они в .env (см. .env.example).
+# Все ID регионов/ролей можно уточнить командой:
+#   python -m src.main dictionaries
+# и свериться с components в openapi.yml (areas, professional_roles)
+
+hh:
+  # Заголовок обязателен по требованиям HH API: "Имя приложения/версия (email)".
+  # HH использует этот email, чтобы связаться с тобой, если что-то не так с запросами.
+  user_agent: "MyJobHelper/1.0 (your-email@example.com)"
+  client_id_env: "HH_CLIENT_ID"
+  client_secret_env: "HH_CLIENT_SECRET"
+
+superjob:
+  # Необязательный источник — убери всю секцию, если не нужен SuperJob вообще,
+  # либо просто выключи его на странице «Настройки» в веб-интерфейсе.
+  secret_key_env: "SUPERJOB_SECRET_KEY"
+  town: 4   # id города в справочнике SuperJob; 4 = Москва
+
+search:
+  # Каждая строка — отдельный запрос text=, результаты объединяются и дедуплицируются по id.
+  # Замени на свои роли/должности.
+  queries:
+    - "python developer"
+    - "backend engineer"
+  # search_field: "name" ищет только в заголовке вакансии (меньше мусора).
+  # Оставь пустым/убери поле, чтобы искать также в описании.
+  search_field: "name"
+  area: 1              # id региона HH; 1 = Москва. См. `python -m src.main dictionaries`.
+  employment: null       # напр. "full" — если хочешь ограничить типом занятости
+  schedule: null          # напр. "remote", "flexible" — если важен формат работы
+  experience: null         # напр. "between3And6", "moreThan6" — см. /dictionaries
+  salary_from: 0            # гросс, RUR; фильтр по нижней границе, 0 — без фильтра
+  currency: "RUR"
+  only_with_salary: false    # true — резко сузит выборку, у многих вакансий ЗП скрыта
+  period: 7                   # искать вакансии за последние N дней (при повторном fetch не
+                                # страшно — дедуп по id)
+  per_page: 50
+  max_pages: 4                 # защита от случайного огромного выкачивания
+  # линии метро, которые считаешь для себя удобными — небольшой плюс к score, если
+  # совпало; если у вакансии метро не указано вообще — нейтрально, не минус.
+  # Точное написание должно совпадать с line_name от HH API — сверь на реальных
+  # вакансиях при первом прогоне (пустой список — просто не участвует в скоринге).
+  priority_metro_lines: []
+
+paths:
+  career_base_md: "./career_base.md"     # твоя карьерная база, см. career_base.example.md
+  db: "./hh_helper.db"
+  out_dir: "./out"
+
+yandex:
+  api_key_env: "YANDEX_API_KEY"   # скрипт читает ключ из переменной окружения, не из файла
+  folder_id: "your-folder-id"      # id каталога в Yandex Cloud, см. console.cloud.yandex.ru
+  scorer_model: "yandexgpt-lite/latest"   # дёшево и достаточно для оценки вакансий
+  tailor_model: "yandexgpt/latest"        # для качественного текста резюме/письма
+
+digest:
+  top_n: 15
+  min_score_to_show: 55   # вакансии с оценкой ниже — не попадают в дайджест вообще
+
+# Порог автоотсечения по score (auto_reject_max_score) настраивается в веб-интерфейсе —
+# страница «Настройки», по умолчанию 40. В конфиге не задаётся.
+
+webapp:
+  host: "0.0.0.0"     # слушает на всех интерфейсах — доступ по IP сервера напрямую
+  port: 8765
+  # логин/пароль для страницы /login (сессионный логин); имена переменных, реальные
+  # значения — в .env. Плюс WEBAPP_SECRET_KEY в .env — подписывает cookie сессии.
+  login_user_env: "WEBAPP_USER"
+  login_password_env: "WEBAPP_PASSWORD"

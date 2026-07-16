@@ -1,0 +1,21 @@
+{% extends "base.html" %}
+{% block title %}Вакансия по ссылке — hh-helper{% endblock %}
+{% block content %}
+<h2>Вакансия по ссылке</h2>
+<p style="color:#666;">Вставь прямую ссылку на вакансию с hh.ru или superjob.ru — не входящую в
+твой обычный поиск (например, кто-то прислал напрямую). Инструмент сразу оценит её, выделит
+ключевые слова для HR/ATS и подготовит резюме с письмом — так же, как для вакансий из основного
+сбора. В общие списки «Разбор»/«Подходит»/«Архив» она не попадёт, только на свою карточку.</p>
+
+{% if error %}
+<p class="flags">⚠ {{ error }}</p>
+{% endif %}
+
+<form method="post" action="{{ url_for('score_url_submit') }}"
+      onsubmit="this.querySelector('button').disabled=true; this.querySelector('button').textContent='⏳ Обрабатываю… (30–60 сек)';">
+  <input type="url" name="url" placeholder="https://hh.ru/vacancy/... или https://www.superjob.ru/vakansii/...html"
+         value="{{ url or '' }}" style="width:100%; max-width:40rem; padding:0.5rem; box-sizing:border-box;" required>
+  <br><br>
+  <button type="submit">Оценить и подготовить резюме</button>
+</form>
+{% endblock %}

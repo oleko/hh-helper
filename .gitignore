@@ -1,0 +1,23 @@
+# Секреты и личные данные — никогда не коммитим
+.env
+config.yaml
+career_base.md
+
+# Данные, которые накапливаются в рантайме
+hh_helper.db
+hh_helper.db-journal
+out/
+backups/
+logs/
+.hh_token_cache.json
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+# IDE / OS
+.vscode/
+.idea/
+.DS_Store

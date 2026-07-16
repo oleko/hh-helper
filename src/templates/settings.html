@@ -1,0 +1,88 @@
+{% extends "base.html" %}
+{% block title %}Настройки — hh-helper{% endblock %}
+{% block content %}
+<h2>Настройки</h2>
+
+<h3>Сбор вакансий</h3>
+<div class="chart-wrap">
+  {% if collection_paused %}
+  <p>⏸ Сбор новых вакансий сейчас <strong>на паузе</strong> — запланированный <code>fetch</code>
+     (см. cron) ничего не скачивает, пока не нажмёшь «Возобновить».</p>
+  <form method="post" action="{{ url_for('settings_collection') }}">
+    <input type="hidden" name="action" value="resume">
+    <button type="submit">▶ Возобновить сбор</button>
+  </form>
+  {% else %}
+  <p>▶ Сбор новых вакансий сейчас идёт по расписанию как обычно.</p>
+  <form method="post" action="{{ url_for('settings_collection') }}">
+    <input type="hidden" name="action" value="pause">
+    <button type="submit">⏸ Поставить на паузу</button>
+  </form>
+  {% endif %}
+</div>
+
+<h3>Источники вакансий</h3>
+<div class="chart-wrap">
+  <p>Пока включён источник — <code>fetch</code> собирает по нему новые вакансии.
+     Выключение не трогает уже собранные вакансии, только останавливает сбор новых.
+     По умолчанию оба включены.</p>
+  <div class="switch-row">
+    <form method="post" action="{{ url_for('settings_sources') }}">
+      <input type="hidden" name="source" value="hh">
+      <input type="hidden" name="action" value="{{ 'disable' if source_hh_enabled else 'enable' }}">
+      <label class="switch">
+        <input type="checkbox" {{ "checked" if source_hh_enabled }} onchange="this.form.submit()">
+        <span class="slider"></span>
+      </label>
+    </form>
+    <span>hh.ru — {{ "включён" if source_hh_enabled else "выключен" }}</span>
+  </div>
+  <div class="switch-row">
+    <form method="post" action="{{ url_for('settings_sources') }}">
+      <input type="hidden" name="source" value="superjob">
+      <input type="hidden" name="action" value="{{ 'disable' if source_superjob_enabled else 'enable' }}">
+      <label class="switch">
+        <input type="checkbox" {{ "checked" if source_superjob_enabled }} onchange="this.form.submit()">
+        <span class="slider"></span>
+      </label>
+    </form>
+    <span>SuperJob — {{ "включён" if source_superjob_enabled else "выключен" }}</span>
+  </div>
+</div>
+
+<h3>Автоотсечение по score</h3>
+<div class="chart-wrap">
+  <p>Вакансии с оценкой (fit_score) не выше этого порога автоматически получают
+     решение 👎 «не подходит» сразу при <code>score</code>, без клика — попадают
+     сразу в «Архив», минуя «Разбор».</p>
+  <form method="post" action="{{ url_for('settings_auto_reject') }}">
+    <input type="number" name="auto_reject_max_score" min="0" max="100" value="{{ auto_reject_max_score }}"
+           style="width:5rem; padding:0.35rem;">
+    <button type="submit">Сохранить</button>
+  </form>
+</div>
+
+<h3>Бэкапы базы</h3>
+<div class="chart-wrap">
+  <p>Сколько последних резервных копий базы хранить (старые лишние удаляются
+     автоматически при следующем <code>backup</code> по cron).</p>
+  <form method="post" action="{{ url_for('settings_backup_keep') }}">
+    <input type="number" name="backup_keep_count" min="1" value="{{ backup_keep_count }}"
+           style="width:5rem; padding:0.35rem;">
+    <button type="submit">Сохранить</button>
+  </form>
+</div>
+
+<h3>Карьерная база</h3>
+<div class="chart-wrap">
+  <p>Источник для скоринга и генерации резюме/писем (<code>career_base.md</code>).
+     Правка применяется сразу, без перезапуска сервиса — но только к новым
+     генерациям, уже подготовленные резюме не пересчитываются задним числом.</p>
+  <form method="post" action="{{ url_for('settings_career_base') }}">
+    <textarea name="career_base" rows="24" style="width:100%; font-family:monospace;
+              font-size:0.85rem; padding:0.6rem; box-sizing:border-box;">{{ career_base }}</textarea>
+    <br><br>
+    <button type="submit">Сохранить карьерную базу</button>
+  </form>
+</div>
+{% endblock %}

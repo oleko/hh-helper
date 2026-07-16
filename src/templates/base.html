@@ -1,0 +1,82 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{% block title %}hh-helper{% endblock %}</title>
+<style>
+  body { font-family: -apple-system, "Segoe UI", Roboto, sans-serif; max-width: 960px;
+         margin: 2rem auto; padding: 0 1rem; color: #1a1a1a; background: #fafafa; }
+  a { color: #0b5fff; text-decoration: none; }
+  a:hover { text-decoration: underline; }
+  table { border-collapse: collapse; width: 100%; }
+  th, td { text-align: left; padding: 0.5rem 0.6rem; border-bottom: 1px solid #ddd; vertical-align: top; }
+  th { font-size: 0.8rem; text-transform: uppercase; color: #666; }
+  .score { font-weight: 700; }
+  .flags { color: #b45309; font-size: 0.85rem; }
+  .badge { display: inline-block; padding: 0.1rem 0.5rem; border-radius: 999px; font-size: 0.8rem; }
+  .badge-respond { background: #dcfce7; color: #166534; }
+  .badge-consider { background: #fef9c3; color: #854d0e; }
+  .badge-skip { background: #f1f5f9; color: #64748b; }
+  form.inline { display: inline-block; margin-right: 0.4rem; }
+  button { cursor: pointer; border: 1px solid #ccc; background: #fff; border-radius: 6px;
+           padding: 0.35rem 0.8rem; font-size: 0.85rem; }
+  button:hover { background: #f1f5f9; }
+  .filters { margin-bottom: 1rem; }
+  .filters select, .filters input { padding: 0.3rem; }
+  pre.notes { white-space: pre-wrap; word-wrap: break-word; background: #fff;
+              border: 1px solid #e2e2e2; border-radius: 8px; padding: 1rem; }
+  .vacancy-description { background: #fff; border: 1px solid #e2e2e2; border-radius: 8px;
+                          padding: 1rem 1.2rem; line-height: 1.55; }
+  .vacancy-description p, .vacancy-description ul, .vacancy-description ol { margin: 0.6rem 0; }
+  .vacancy-description ul, .vacancy-description ol { padding-left: 1.4rem; }
+  .legend { margin-bottom: 1rem; background: #fff; border: 1px solid #e2e2e2; border-radius: 8px;
+            padding: 0.5rem 1rem; }
+  .legend summary { cursor: pointer; font-weight: 600; }
+  .legend ul { margin: 0.5rem 0 0.2rem; padding-left: 1.2rem; font-size: 0.9rem; }
+  .legend li { margin: 0.25rem 0; }
+  .topnav { display: flex; align-items: baseline; justify-content: space-between; gap: 1rem; flex-wrap: wrap; }
+  .topnav h1 { margin: 0; }
+  .topnav nav a { margin-left: 1rem; font-size: 0.9rem; }
+  .topnav nav a.active { font-weight: 700; text-decoration: underline; }
+  .chip { display: inline-block; padding: 0.15rem 0.55rem; border-radius: 999px;
+          font-size: 0.78rem; font-weight: 600; color: #fff; margin: 0.15rem 0.3rem 0.15rem 0; }
+  .badge-fit { background: #dcfce7; color: #166534; }
+  .badge-not_fit { background: #fee2e2; color: #991b1b; }
+  .chart-wrap { overflow-x: auto; background: #fff; border: 1px solid #e2e2e2;
+                border-radius: 8px; padding: 1rem; }
+  .switch { position: relative; display: inline-block; width: 42px; height: 23px; vertical-align: middle; }
+  .switch input { opacity: 0; width: 0; height: 0; }
+  .switch .slider { position: absolute; inset: 0; cursor: pointer; background: #ccc;
+                     transition: 0.15s; border-radius: 999px; }
+  .switch .slider::before { position: absolute; content: ""; height: 17px; width: 17px;
+                             left: 3px; bottom: 3px; background: #fff; transition: 0.15s; border-radius: 50%; }
+  .switch input:checked + .slider { background: #0b5fff; }
+  .switch input:checked + .slider::before { transform: translateX(19px); }
+  .switch-row { display: flex; align-items: center; gap: 0.7rem; margin: 0.5rem 0; }
+</style>
+</head>
+<body>
+{% if page == 'login' %}
+<h1>hh-helper</h1>
+{% else %}
+<div class="topnav">
+  <h1><a href="{{ url_for('index') }}">hh-helper</a></h1>
+  <nav>
+    <a href="{{ url_for('index') }}" class="{{ 'active' if page == 'unsorted' }}">Разбор{% if nav_counts %} ({{ nav_counts.unsorted }}){% endif %}</a>
+    <a href="{{ url_for('liked_page') }}" class="{{ 'active' if page == 'liked' }}">Подходит{% if nav_counts %} ({{ nav_counts.fit }}){% endif %}</a>
+    <a href="{{ url_for('archive_page') }}" class="{{ 'active' if page == 'archive' }}">Архив{% if nav_counts %} ({{ nav_counts.not_fit }}){% endif %}</a>
+    <a href="{{ url_for('score_url_form') }}" class="{{ 'active' if page == 'tool' }}">Вакансия по ссылке</a>
+    <a href="{{ url_for('stats_page') }}">Статистика</a>
+    <a href="{{ url_for('settings_page') }}" class="{{ 'active' if page == 'settings' }}">Настройки</a>
+    <a href="{{ url_for('help_page') }}">Справка</a>
+    <form method="post" action="{{ url_for('logout') }}" style="display:inline; margin-left:1rem;">
+      <button type="submit" style="background:none; border:none; color:#0b5fff; text-decoration:underline;
+              cursor:pointer; padding:0; font:inherit;">Выйти</button>
+    </form>
+  </nav>
+</div>
+{% endif %}
+{% block content %}{% endblock %}
+</body>
+</html>

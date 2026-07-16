@@ -1,0 +1,92 @@
+{% extends "base.html" %}
+{% block title %}{{ v.name }} — hh-helper{% endblock %}
+{% block content %}
+<p><a href="{{ url_for('index') }}">&larr; ко всем вакансиям</a></p>
+<h2>{{ v.name }} <small>— {{ v.employer or "—" }}</small></h2>
+<p>
+  <span class="score">Score: {{ v.score }}</span> ·
+  Трек {{ v.track or "?" }} ·
+  ЗП {{ v.salary_fit or "не указана" }} ·
+  <span class="badge badge-{{ v.recommend }}">{{ v.recommend_label }}</span> ·
+  статус: <b>{{ v.status }}</b> ·
+  <span class="chip" style="background:#555;">{{ v.source_label }}</span>
+  {% if v.decision == "fit" %}· <span class="badge badge-fit">подходит</span>{% endif %}
+  {% if v.decision == "not_fit" %}· <span class="badge badge-not_fit">не подходит</span>{% endif %}
+</p>
+{% if v.decision_reason %}
+<p style="color:#666; font-size:0.9rem;"><em>Причина: {{ v.decision_reason }}</em></p>
+{% endif %}
+{% if v.metro_station %}
+<p>🚇 {{ v.metro_station }}{% if v.metro_line %} ({{ v.metro_line }}){% endif %}
+   {% if v.metro_priority %}<strong>— приоритетная линия</strong>{% endif %}</p>
+{% endif %}
+{% if v.archived %}
+<p class="flags">🗄 по данным {{ v.source_label }} вакансия в архиве/снята с публикации
+   {% if v.archive_checked_at %}(проверено {{ v.archive_checked_at[:16] | replace("T", " ") }}){% endif %}</p>
+{% elif v.archive_checked_at %}
+<p style="color:#166534;">✓ актуальна на {{ v.source_label }} (проверено {{ v.archive_checked_at[:16] | replace("T", " ") }})</p>
+{% endif %}
+{% if v.red_flags %}
+<p class="flags">⚠ {{ v.red_flags | join(", ") }}</p>
+{% endif %}
+<p>{{ v.rationale }}</p>
+{% if v.ats_keywords %}
+<p>
+  <span style="color:#666; font-size:0.85rem;">Ключевые слова для HR/ATS:</span><br>
+  {% for kw in v.ats_keywords %}<span class="chip" style="background:#0b5fff;">{{ kw }}</span>{% endfor %}
+</p>
+{% endif %}
+<p><a href="{{ v.url }}" target="_blank" rel="noopener">Открыть на {{ v.source_label }} →</a></p>
+
+<form class="inline" method="post" action="{{ url_for('vacancy_status', vacancy_id=v.id) }}">
+  <input type="hidden" name="status" value="applied">
+  <button type="submit">Откликнулся</button>
+</form>
+<form class="inline" method="post" action="{{ url_for('vacancy_check', vacancy_id=v.id) }}">
+  <button type="submit">Проверить актуальность</button>
+</form>
+<br><br>
+<form method="post" action="{{ url_for('vacancy_decide', vacancy_id=v.id) }}">
+  <input type="text" name="reason" placeholder="Почему? (необязательно)"
+         value="{{ v.decision_reason or '' }}" style="width:22rem; max-width:100%; padding:0.35rem;">
+  <br><br>
+  {% if v.decision != "fit" %}
+  <button type="submit" name="decision" value="fit">👍 Подходит</button>
+  {% endif %}
+  {% if v.decision != "not_fit" %}
+  <button type="submit" name="decision" value="not_fit">👎 Не подходит (в архив)</button>
+  {% endif %}
+  {% if v.decision %}
+  <button type="submit" name="decision" value="clear">Сбросить решение</button>
+  {% endif %}
+</form>
+
+<h3>Резюме и письмо</h3>
+{% if notes %}
+<h4>resume_notes.md</h4>
+<pre class="notes">{{ notes }}</pre>
+<h4>resume_full.md
+  {% if has_docx %}
+  <a href="{{ url_for('vacancy_resume_docx', vacancy_id=v.id) }}" style="font-size:0.85rem; font-weight:normal;">⬇ Скачать .docx</a>
+  {% endif %}
+</h4>
+<pre class="notes">{{ resume_full }}</pre>
+<h4>cover_letter.txt</h4>
+<pre class="notes">{{ letter }}</pre>
+<form method="post" action="{{ url_for('vacancy_tailor', vacancy_id=v.id) }}"
+      onsubmit="this.querySelector('button').disabled=true; this.querySelector('button').textContent='⏳ Генерирую… (20–40 сек)';">
+  <button type="submit">Перегенерировать</button>
+</form>
+{% else %}
+<form method="post" action="{{ url_for('vacancy_tailor', vacancy_id=v.id) }}"
+      onsubmit="this.querySelector('button').disabled=true; this.querySelector('button').textContent='⏳ Генерирую… (20–40 сек)';">
+  <button type="submit">Подготовить резюме и письмо</button>
+</form>
+{% endif %}
+
+<h3>Текст вакансии</h3>
+{% if unavailable_notice %}
+<p class="flags">⚠ {{ unavailable_notice }}</p>
+{% endif %}
+<div class="vacancy-description">{{ description_html | safe }}</div>
+{% endblock %}

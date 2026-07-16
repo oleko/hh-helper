@@ -1,0 +1,112 @@
+{% extends "base.html" %}
+{% block title %}{% if page == "liked" %}Подходит{% elif page == "archive" %}Архив{% else %}Разбор вакансий{% endif %} — hh-helper{% endblock %}
+{% block content %}
+<h2>
+{% if page == "liked" %}👍 Подходит
+{% elif page == "archive" %}👎 Архив
+{% else %}Разбор вакансий
+{% endif %}
+</h2>
+{% if page == "unsorted" %}
+<p style="color:#666;">Цель — довести этот список до нуля: у каждой вакансии должно быть
+решение 👍 или 👎. Разобранные уходят в «Подходит» или «Архив» и здесь больше не мозолят глаза.</p>
+{% endif %}
+
+{% if daily_comment %}
+<div class="chart-wrap" style="margin-bottom:1rem;">
+  <p style="margin:0 0 0.3rem; font-size:0.75rem; text-transform:uppercase; color:#666;">
+    Комментарий дня ({{ daily_comment_day }})</p>
+  <p style="margin:0;">{{ daily_comment }}</p>
+</div>
+{% endif %}
+<details class="legend">
+  <summary>Легенда</summary>
+  <ul>
+    <li><span class="badge badge-respond">Подходит</span> — модель считает, что стоит откликнуться
+        (score ≥ 70, без серьёзных красных флагов)</li>
+    <li><span class="badge badge-consider">Подумай</span> — стоит подумать (score 50-69 или спорные флаги)</li>
+    <li><span class="badge badge-skip">Пропусти</span> — низкий score или явный дилбрейкер</li>
+    <li>🚇 — метро вакансии на приоритетной для тебя линии</li>
+    <li>🗄 — по последней проверке вакансия в архиве/снята с публикации на источнике
+        (hh.ru/SuperJob; не путать со страницей «Архив» — она про твоё решение)</li>
+    <li>👍 «Подходит» / 👎 «Не подходит» — твоё собственное решение по вакансии
+        (кнопки прямо в таблице, не путать с бейджем рекомендации модели выше).
+        Три раздела в шапке — «Разбор» (без решения), «Подходит» (👍),
+        «Архив» (👎) — вакансия всегда ровно в одном из них. Кнопка ↩ возвращает
+        в «Разбор», если передумал. Новые вакансии без решения помечены чипом
+        <span class="chip" style="background:#0b5fff;">NEW</span>.</li>
+    <li>Статус: <code>new</code> → <code>digested</code> (попало в дайджест) →
+        <code>skip</code> (= 👎 не подходит) → <code>applied</code> (откликнулся, = 👍 подходит)</li>
+  </ul>
+</details>
+
+<form class="filters" method="get">
+  <label>Мин. score:
+    <input type="number" name="min_score" value="{{ min_score }}" min="0" max="100"
+           style="width:4rem" onchange="this.form.submit()">
+  </label>
+  <label>Сортировка:
+    <select name="sort" onchange="this.form.submit()">
+      <option value="score" {{ "selected" if sort == "score" }}>по score</option>
+      <option value="fit_first" {{ "selected" if sort == "fit_first" }}>сначала подходящие</option>
+      <option value="new_first" {{ "selected" if sort == "new_first" }}>сначала новые</option>
+      <option value="old_unreviewed" {{ "selected" if sort == "old_unreviewed" }}>сначала старые непросмотренные</option>
+    </select>
+  </label>
+</form>
+
+{% if not vacancies %}
+  {% if page == "unsorted" %}
+  <p>🎉 Разобрано всё. Новых вакансий на рассмотрение нет — загляни в «Подходит»
+     или дождись завтрашнего <code>fetch</code>.</p>
+  {% elif page == "liked" %}
+  <p>Пока нет вакансий с решением «подходит».</p>
+  {% else %}
+  <p>Архив пуст.</p>
+  {% endif %}
+{% else %}
+<table>
+  <thead>
+    <tr><th>Score</th><th>Вакансия</th><th>Трек</th><th>ЗП</th><th>Рекомендация</th><th>Флаги</th><th>Решение</th></tr>
+  </thead>
+  <tbody>
+  {% for v in vacancies %}
+    <tr>
+      <td class="score">{{ v.score }}</td>
+      <td><a href="{{ url_for('vacancy_detail', vacancy_id=v.id) }}">{{ v.name }}</a>
+          {% if v.status == "new" %}<span class="chip" style="background:#0b5fff;">NEW</span>{% endif %}
+          {% if v.metro_priority %}🚇{% endif %}{% if v.archived %}🗄{% endif %}<br>
+          <small>{{ v.employer or "—" }}{% if v.metro_station %} · {{ v.metro_station }}{% endif %}
+          {%- if v.published_at %} · {{ v.published_at[:10] }}{% endif %} · {{ v.source_label }}</small></td>
+      <td>{{ v.track or "?" }}</td>
+      <td>{{ v.salary_fit or "не указана" }}{% if v.salary_display %}<br><small>{{ v.salary_display }}</small>{% endif %}</td>
+      <td><span class="badge badge-{{ v.recommend }}">{{ v.recommend_label }}</span></td>
+      <td class="flags">{{ v.red_flags | join(", ") }}</td>
+      <td>
+        <form class="inline" method="post" action="{{ url_for('vacancy_decide', vacancy_id=v.id) }}">
+          <button type="submit" name="decision" value="fit"
+                  title="Подходит"{% if v.decision == "fit" %} disabled{% endif %}>👍</button>
+          <button type="submit" name="decision" value="not_fit"
+                  title="Не подходит"{% if v.decision == "not_fit" %} disabled{% endif %}>👎</button>
+          {% if v.decision %}
+          <button type="submit" name="decision" value="clear" title="Вернуть в разбор">↩</button>
+          {% endif %}
+        </form>
+      </td>
+    </tr>
+  {% endfor %}
+  </tbody>
+</table>
+{% if total_pages > 1 %}
+<p class="filters" style="display:flex; align-items:center; gap:0.8rem;">
+  {% if page_num > 1 %}
+  <a href="{{ url_for(request.endpoint, status=status, min_score=min_score, sort=sort, page=page_num-1) }}">« Назад</a>
+  {% endif %}
+  <span style="color:#666; font-size:0.85rem;">Страница {{ page_num }} из {{ total_pages }} ({{ total }} вакансий)</span>
+  {% if page_num < total_pages %}
+  <a href="{{ url_for(request.endpoint, status=status, min_score=min_score, sort=sort, page=page_num+1) }}">Вперёд »</a>
+  {% endif %}
+</p>
+{% endif %}
+{% endif %}
+{% endblock %}
