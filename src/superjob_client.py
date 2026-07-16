@@ -142,3 +142,10 @@ class SuperJobClient:
         if status == 404:
             return {"found": False, "archived": True}
         return {"found": True, "archived": bool(data.get("is_closed"))}
+
+    def get_towns(self) -> list[dict]:
+        """Полный справочник городов SuperJob (id, title) — для страницы поиска
+        id города в веб-интерфейсе (см. /tool/areas). `all=1` отдаёт весь список
+        одним запросом, без постраничного прохода."""
+        data, _ = self._get("/towns/", {"all": 1})
+        return data.get("objects", [])

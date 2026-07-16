@@ -50,6 +50,47 @@
   </div>
 </div>
 
+<h3>Поиск</h3>
+<div class="chart-wrap">
+  <p>Город, зарплатный порог и приоритетные линии метро для <code>fetch</code> —
+     раньше это было в <code>config.yaml</code> числовыми id, теперь можно выбрать
+     прямо здесь. Город одним выбором задаёт id и для hh.ru, и для SuperJob сразу
+     (у них разные справочники городов).</p>
+  <form method="post" action="{{ url_for('settings_search') }}">
+    <label>Город:
+      <select name="city">
+        {% for c in cities %}
+        <option value="{{ c.hh_area }}|{{ c.superjob_town }}" {{ "selected" if c.hh_area == search_area }}>{{ c.name }}</option>
+        {% endfor %}
+      </select>
+    </label>
+    <br><br>
+    <details>
+      <summary>Другой город (нет в списке — введи id вручную)</summary>
+      <p style="color:#666; font-size:0.85rem; margin:0.4rem 0;">
+        Если заполнишь «HH area id» — он победит выбор из списка выше.
+        Найти id города: <a href="{{ url_for('areas_lookup') }}">поиск по названию</a>.</p>
+      <label>HH area id: <input type="number" name="custom_area" style="width:6rem; padding:0.3rem;"></label>
+      &nbsp;
+      <label>SuperJob town id (необязательно): <input type="number" name="custom_town" style="width:6rem; padding:0.3rem;"></label>
+    </details>
+    <br>
+    <label>Зарплата от (гросс, ₽; 0 — без порога):
+      <input type="number" name="search_salary_from" min="0" value="{{ search_salary_from }}"
+             style="width:8rem; padding:0.35rem;">
+    </label>
+    <br><br>
+    <label>Приоритетные линии метро (по одной на строку — небольшой плюс к score,
+           если совпало; пусто — не влияет на score):<br>
+      <textarea name="priority_metro_lines" rows="6" style="width:100%; max-width:24rem;
+                font-family:monospace; font-size:0.85rem; padding:0.5rem; box-sizing:border-box;"
+                >{{ metro_lines_text }}</textarea>
+    </label>
+    <br><br>
+    <button type="submit">Сохранить</button>
+  </form>
+</div>
+
 <h3>Автоотсечение по score</h3>
 <div class="chart-wrap">
   <p>Вакансии с оценкой (fit_score) не выше этого порога автоматически получают

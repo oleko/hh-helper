@@ -27,8 +27,16 @@ from flask import Flask, abort, redirect, render_template, request, send_file, s
 log = logging.getLogger("webapp")
 
 from .docx_export import build_resume_docx, extract_candidate_name
+from .geo import CITIES, flatten_hh_areas, flatten_superjob_towns
 from .hh_client import HHApiError, HHClient
-from .main import get_hh_config, get_superjob_config, get_yandex_config, load_career_base, refresh_vacancy_status
+from .main import (
+    get_hh_config,
+    get_priority_metro_lines,
+    get_superjob_config,
+    get_yandex_config,
+    load_career_base,
+    refresh_vacancy_status,
+)
 from .scorer import build_corrections_note, get_metro, score_vacancy, vacancy_to_text
 from .sources import get_full_vacancy, get_vacancy_status, parse_vacancy_url
 from .storage import Storage
@@ -122,6 +130,10 @@ def create_app(cfg: dict) -> Flask:
     # контейнер, простое переприсваивание в closure тут не сработает)
     career_state = {"text": load_career_base(str(career_base_path))}
     career_state["candidate_name"] = extract_candidate_name(career_state["text"])
+    # плоские справочники городов для /tool/areas — тянутся из API один раз и
+    # держатся в памяти процесса (справочники регионов меняются очень редко,
+    # перечитывать их на каждый запрос смысла нет; сбрасывается перезапуском serve)
+    geo_cache: dict[str, list[dict] | None] = {"hh": None, "superjob": None}
     # .resolve() — важно для send_file (см. vacancy_resume_docx): Flask резолвит
     # относительные пути в send_file от root_path пакета (src/), а не от рабочей
     # директории процесса, так что "./out" тихо ломался на скачивании .docx.
@@ -129,7 +141,9 @@ def create_app(cfg: dict) -> Flask:
     # получаем конфиг модели один раз при старте — если ключ/folder_id не заданы,
     # процесс упадёт сразу при запуске serve, а не посреди случайного запроса
     tailor_ycfg = get_yandex_config(cfg, cfg["yandex"]["tailor_model"])
-    priority_lines = cfg["search"].get("priority_metro_lines") or []
+    # линии метро — настройка, которая может поменяться через /settings, пока
+    # серверный процесс уже запущен, поэтому читаем её каждый раз заново из
+    # storage, а не кэшируем в closure (в отличие от tailor_ycfg/career_state)
 
     w = cfg["webapp"]
     login_user = os.environ.get(w["login_user_env"])
@@ -181,7 +195,7 @@ def create_app(cfg: dict) -> Flask:
 
     @app.get("/help")
     def help_page():
-        return render_template("help.html")
+        return render_template("help.html", metro_lines=get_priority_metro_lines(storage))
 
     @app.get("/stats")
     def stats_page():
@@ -288,6 +302,10 @@ def create_app(cfg: dict) -> Flask:
         source_hh_enabled = storage.get_setting("source_hh_enabled", "1") == "1"
         source_superjob_enabled = storage.get_setting("source_superjob_enabled", "1") == "1"
         auto_reject_max_score = int(storage.get_setting("auto_reject_max_score", "40"))
+        search_area = storage.get_setting("search_area", "1")
+        search_superjob_town = storage.get_setting("superjob_town", "4")
+        search_salary_from = int(storage.get_setting("search_salary_from", "0") or 0)
+        metro_lines_text = "\n".join(get_priority_metro_lines(storage))
         return render_template(
             "settings.html",
             page="settings",
@@ -296,6 +314,11 @@ def create_app(cfg: dict) -> Flask:
             source_hh_enabled=source_hh_enabled,
             source_superjob_enabled=source_superjob_enabled,
             auto_reject_max_score=auto_reject_max_score,
+            cities=CITIES,
+            search_area=search_area,
+            search_superjob_town=search_superjob_town,
+            search_salary_from=search_salary_from,
+            metro_lines_text=metro_lines_text,
             career_base=career_state["text"],
         )
 
@@ -329,6 +352,30 @@ def create_app(cfg: dict) -> Flask:
         storage.set_setting("collection_paused", "1" if action == "pause" else "0")
         return redirect(url_for("settings_page"))
 
+    @app.post("/settings/search")
+    def settings_search():
+        custom_area = (request.form.get("custom_area") or "").strip()
+        if custom_area:
+            area, town = custom_area, (request.form.get("custom_town") or "").strip()
+        else:
+            area, _, town = (request.form.get("city") or "").partition("|")
+        if not area.isdigit():
+            abort(400, "Регион (HH area id) должен быть числом.")
+        storage.set_setting("search_area", area)
+        storage.set_setting("superjob_town", town if town.isdigit() else "")
+
+        try:
+            salary = int(request.form.get("search_salary_from", "0") or 0)
+        except ValueError:
+            abort(400, "Зарплатный порог должен быть целым числом.")
+        if salary < 0:
+            abort(400, "Зарплатный порог не может быть отрицательным.")
+        storage.set_setting("search_salary_from", str(salary))
+
+        lines = [ln.strip() for ln in (request.form.get("priority_metro_lines") or "").splitlines() if ln.strip()]
+        storage.set_setting("priority_metro_lines", json.dumps(lines, ensure_ascii=False))
+        return redirect(url_for("settings_page"))
+
     @app.post("/settings/sources")
     def settings_sources():
         source = request.form.get("source")
@@ -347,6 +394,22 @@ def create_app(cfg: dict) -> Flask:
         career_state["text"] = text
         career_state["candidate_name"] = extract_candidate_name(text)
         return redirect(url_for("settings_page"))
+
+    @app.get("/tool/areas")
+    def areas_lookup():
+        q = (request.args.get("q") or "").strip()
+        hh_results: list[dict] = []
+        sj_results: list[dict] = []
+        if q:
+            if geo_cache["hh"] is None:
+                geo_cache["hh"] = flatten_hh_areas(hh.get_areas())
+            if sj is not None and geo_cache["superjob"] is None:
+                geo_cache["superjob"] = flatten_superjob_towns(sj.get_towns())
+            ql = q.lower()
+            hh_results = [a for a in geo_cache["hh"] if ql in a["name"].lower()][:40]
+            if geo_cache["superjob"]:
+                sj_results = [t for t in geo_cache["superjob"] if ql in t["name"].lower()][:40]
+        return render_template("areas.html", page="tool", q=q, hh_results=hh_results, sj_results=sj_results)
 
     def _generate_tailor_files(vacancy_id: str, text: str) -> None:
         """Общий код генерации 4 файлов (notes/resume_full/letter/docx) —
@@ -414,7 +477,7 @@ def create_app(cfg: dict) -> Flask:
             abort(404)
         try:
             full = get_full_vacancy(hh, sj, vacancy_id, row["source"])
-            text = vacancy_to_text(full, priority_lines)
+            text = vacancy_to_text(full, get_priority_metro_lines(storage))
         except _SOURCE_ERRORS as e:
             log.warning("Не удалось получить %s (%s): %s", vacancy_id, row["source"], e)
             saved_text_path = out_dir / vacancy_id / "vacancy.txt"
@@ -508,6 +571,7 @@ def create_app(cfg: dict) -> Flask:
         if row is None:
             storage.upsert_vacancy(full, source=source, origin="manual_url")
             row = storage.get(vacancy_id)
+        priority_lines = get_priority_metro_lines(storage)
         text = vacancy_to_text(full, priority_lines)
         if row["score"] is None:
             scorer_ycfg = get_yandex_config(cfg, cfg["yandex"]["scorer_model"])

@@ -84,6 +84,12 @@ def get_hh_config(cfg: dict) -> HHConfig:
     return HHConfig(client_id=client_id, client_secret=client_secret, user_agent=h["user_agent"])
 
 
+def get_priority_metro_lines(storage: Storage) -> list[str]:
+    """Линии метро, дающие небольшой плюс к score — настраиваются на странице
+    «Настройки», не в config.yaml (см. settings_search в webapp.py)."""
+    return json.loads(storage.get_setting("priority_metro_lines", "[]"))
+
+
 def get_superjob_config(cfg: dict) -> SuperJobConfig | None:
     """None, если секции superjob нет в конфиге вовсе — источник полностью опционален."""
     s = cfg.get("superjob")
@@ -106,6 +112,13 @@ def cmd_fetch(cfg: dict) -> None:
     s = cfg["search"]
     total_new = 0
 
+    # город и зарплатный порог — настраиваются на странице «Настройки» (веб-интерфейс),
+    # не в config.yaml, чтобы человек без техфона мог выбрать город из списка,
+    # а не искать числовой id региона в JSON-справочнике HH/SuperJob вручную.
+    search_area = storage.get_setting("search_area", "1")            # 1 = Москва
+    superjob_town = storage.get_setting("superjob_town", "4") or None  # 4 = Москва
+    salary_from = int(storage.get_setting("search_salary_from", "0") or 0)
+
     if storage.get_setting("source_hh_enabled", "1") == "1":
         hh = HHClient(get_hh_config(cfg))
         for query in s["queries"]:
@@ -113,11 +126,11 @@ def cmd_fetch(cfg: dict) -> None:
             params = {
                 "text": query,
                 "search_field": s.get("search_field") or None,
-                "area": s.get("area"),
+                "area": search_area,
                 "employment": s.get("employment"),
                 "schedule": s.get("schedule"),
                 "experience": s.get("experience"),
-                "salary": s.get("salary_from"),
+                "salary": salary_from or None,
                 "currency": s.get("currency"),
                 "only_with_salary": "true" if s.get("only_with_salary") else None,
                 "period": s.get("period"),
@@ -141,8 +154,8 @@ def cmd_fetch(cfg: dict) -> None:
             log.info("[SuperJob] Поиск: %r", query)
             params = {
                 "keyword": query,
-                "town": cfg["superjob"].get("town"),
-                "payment_from": s.get("salary_from"),
+                "town": superjob_town,
+                "payment_from": salary_from or None,
                 # period у SuperJob — не число дней, а перечисление (0=всё время,
                 # 1=сутки, 3=трое суток, 7=неделя, 30=месяц); совпадение с числом
                 # дней из search.period случайно, но пока значение 7 подходит и там,
@@ -174,7 +187,7 @@ def cmd_score(cfg: dict) -> None:
     career_base = load_career_base(cfg["paths"]["career_base_md"])
     ycfg = get_yandex_config(cfg, cfg["yandex"]["scorer_model"])
 
-    priority_lines = cfg["search"].get("priority_metro_lines") or []
+    priority_lines = get_priority_metro_lines(storage)
     # реальные расхождения решение/рекомендация — один раз на весь прогон,
     # не на каждую вакансию заново (список меняется не так часто)
     corrections_note = build_corrections_note(storage.disagreements())
@@ -248,7 +261,7 @@ def cmd_tailor(cfg: dict, vacancy_id: str) -> None:
     if row is None:
         raise SystemExit(f"Вакансия {vacancy_id} не найдена в базе. Сначала fetch/score.")
 
-    priority_lines = cfg["search"].get("priority_metro_lines") or []
+    priority_lines = get_priority_metro_lines(storage)
     full = get_full_vacancy(hh, sj, vacancy_id, row["source"])
     text = vacancy_to_text(full, priority_lines)
     notes, resume_full, letter = tailor_for_vacancy(ycfg, career_base, text)

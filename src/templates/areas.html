@@ -1,0 +1,55 @@
+{% extends "base.html" %}
+{% block title %}Поиск id города — hh-helper{% endblock %}
+{% block content %}
+<h2>Поиск id города</h2>
+<p style="color:#666;">Для города, которого нет в списке на странице «Настройки» →
+«Поиск»: найди его здесь по названию и скопируй числовой id в поле «свой id»
+(отдельно для hh.ru и для SuperJob — это разные справочники, id обычно не совпадают).</p>
+
+<form method="get" action="{{ url_for('areas_lookup') }}">
+  <input type="text" name="q" value="{{ q }}" placeholder="Например: Тверь"
+         style="width:20rem; max-width:100%; padding:0.5rem;" autofocus>
+  <button type="submit">Найти</button>
+</form>
+
+{% if q %}
+<div class="chart-wrap" style="margin-top:1rem; display:flex; gap:2rem; flex-wrap:wrap;">
+  <div style="min-width:16rem;">
+    <h4 style="margin-top:0;">hh.ru</h4>
+    {% if hh_results %}
+    <table>
+      <thead><tr><th>id</th><th>Название</th></tr></thead>
+      <tbody>
+      {% for a in hh_results %}
+        <tr><td>{{ a.id }}</td><td>{{ a.name }}</td></tr>
+      {% endfor %}
+      </tbody>
+    </table>
+    {% if hh_results|length == 40 %}
+    <p style="color:#666; font-size:0.85rem;">Показаны первые 40 — уточни запрос, если нужного нет в списке.</p>
+    {% endif %}
+    {% else %}
+    <p style="color:#666;">Ничего не нашлось.</p>
+    {% endif %}
+  </div>
+  <div style="min-width:16rem;">
+    <h4 style="margin-top:0;">SuperJob</h4>
+    {% if sj_results %}
+    <table>
+      <thead><tr><th>id</th><th>Название</th></tr></thead>
+      <tbody>
+      {% for t in sj_results %}
+        <tr><td>{{ t.id }}</td><td>{{ t.name }}</td></tr>
+      {% endfor %}
+      </tbody>
+    </table>
+    {% if sj_results|length == 40 %}
+    <p style="color:#666; font-size:0.85rem;">Показаны первые 40 — уточни запрос, если нужного нет в списке.</p>
+    {% endif %}
+    {% else %}
+    <p style="color:#666;">Ничего не нашлось (или источник SuperJob выключен/не настроен).</p>
+    {% endif %}
+  </div>
+</div>
+{% endif %}
+{% endblock %}
