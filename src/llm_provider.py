@@ -46,7 +46,7 @@ def get_provider(cfg: dict, task: str, storage=None) -> LLMProvider:
         from .yandex_client import YandexProvider
 
         ycfg = get_yandex_config(cfg, model_override or cfg["yandex"][model_key])
-        mode = llm_cfg.get("mode", "sync")
+        mode = llm_cfg.get(f"{task}_mode") or llm_cfg.get("mode", "sync")
         return YandexProvider(ycfg, mode=mode)
 
     if provider_name == "gigachat":

@@ -11,11 +11,14 @@
 
 scoring:
   - provider: yandex
+    model: "yandexgpt-5-lite/latest"
+    label: "YandexGPT 5 Lite (по умолчанию, дёшево, async)"
+  - provider: yandex
     model: "yandexgpt-lite/latest"
-    label: "YandexGPT Lite (по умолчанию, дёшево)"
+    label: "YandexGPT Lite (предыдущее поколение)"
   - provider: yandex
     model: "yandexgpt/rc"
-    label: "YandexGPT Pro 5.1 (release candidate)"
+    label: "YandexGPT Pro (release candidate)"
   - provider: yandex
     model: "aliceai-llm-flash/latest"
     label: "Alice AI LLM Flash"
@@ -25,11 +28,14 @@ scoring:
 
 tailor:
   - provider: yandex
+    model: "yandexgpt-5.1/latest"
+    label: "YandexGPT 5.1 Pro (по умолчанию)"
+  - provider: yandex
     model: "yandexgpt/latest"
-    label: "YandexGPT Pro (по умолчанию)"
+    label: "YandexGPT Pro (предыдущее поколение)"
   - provider: yandex
     model: "yandexgpt/rc"
-    label: "YandexGPT Pro 5.1 (release candidate)"
+    label: "YandexGPT Pro (release candidate)"
   - provider: gigachat
     model: "GigaChat-2-Pro"
     label: "GigaChat-2-Pro (экспериментально)"

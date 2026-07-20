@@ -50,8 +50,8 @@ paths:
 yandex:
   api_key_env: "YANDEX_API_KEY"   # скрипт читает ключ из переменной окружения, не из файла
   folder_id: "your-folder-id"      # id каталога в Yandex Cloud, см. console.cloud.yandex.ru
-  scorer_model: "yandexgpt-lite/latest"   # дёшево и достаточно для оценки вакансий
-  tailor_model: "yandexgpt/latest"        # для качественного текста резюме/письма
+  scorer_model: "yandexgpt-5-lite/latest"   # generation 5 lite — дёшево, для массового скоринга
+  tailor_model: "yandexgpt-5.1/latest"      # generation 5.1 Pro — для качественного текста резюме/письма
 
 gigachat:
   # Опционально — второй LLM-провайдер (src/gigachat_client.py). Убери всю секцию,
@@ -68,8 +68,11 @@ llm:
   provider: "yandex"
   score_provider: null    # null = взять provider выше; можно переопределить отдельно для скоринга
   tailor_provider: null   # то же для tailor'а
-  mode: "sync"            # sync | async — у Yandex оба реализованы; async полезен только
-                          # для cron-пайплайна (fetch→score→digest), не для веб-запросов
+  mode: "sync"            # sync | async — дефолт, если score_mode/tailor_mode не заданы
+  score_mode: "async"     # скоринг гоняется массово по cron — polling не мешает, не держит
+                          # долгие открытые соединения (см. yandex_client.py: completionAsync)
+  tailor_mode: null       # null = взять mode выше ("sync") — резюме/письма генерируются по
+                          # клику в вебе, пользователь ждёт результат сразу на экране
   batch_scoring: false    # пакетный скоринг по N вакансий за запрос — экспериментально, выключено
 
 digest:
