@@ -226,6 +226,7 @@ const PROVIDER_LABEL = {yandex: "Yandex", gigachat: "GigaChat"};
 function populateSelect(select, provider, models, defaultModel) {
   const prefix = `${provider}:`;
   const previousValue = select.value;
+  const wasThisProviderSelected = previousValue.startsWith(prefix);
   [...select.options].filter((o) => o.value.startsWith(prefix)).forEach((o) => o.remove());
   models.forEach((m) => {
     const opt = document.createElement("option");
@@ -233,12 +234,19 @@ function populateSelect(select, provider, models, defaultModel) {
     opt.textContent = `${PROVIDER_LABEL[provider]}: ${m}`;
     select.appendChild(opt);
   });
+  // Yandex и GigaChat обновляются параллельно — если сейчас реально выбрана
+  // модель ДРУГОГО провайдера, трогать select.value нельзя: чей fetch ответит
+  // последним, тот раньше безусловно перезаписывал чужой выбор своим дефолтом.
   const savedChoice = select.dataset.current;
   if (savedChoice && savedChoice.startsWith(prefix) && models.includes(savedChoice.slice(prefix.length))) {
     select.value = savedChoice;
-  } else if (previousValue && previousValue.startsWith(prefix) && models.includes(previousValue.slice(prefix.length))) {
+  } else if (wasThisProviderSelected && models.includes(previousValue.slice(prefix.length))) {
     select.value = previousValue;
-  } else if (models.includes(defaultModel)) {
+  } else if (wasThisProviderSelected && models.includes(defaultModel)) {
+    // сохранённый выбор был у этого провайдера, но пропал из живого каталога
+    select.value = `${prefix}${defaultModel}`;
+  } else if (!previousValue && models.includes(defaultModel)) {
+    // выбора вообще не было ни у кого — подставляем дефолт этого провайдера
     select.value = `${prefix}${defaultModel}`;
   }
 }
