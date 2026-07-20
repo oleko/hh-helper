@@ -248,6 +248,11 @@ function populateSelect(select, provider, models, defaultModel) {
   } else if (!previousValue && models.includes(defaultModel)) {
     // выбора вообще не было ни у кого — подставляем дефолт этого провайдера
     select.value = `${prefix}${defaultModel}`;
+  } else if (wasThisProviderSelected && models.length > 0) {
+    // и сохранённый выбор, и хардкоженный дефолт пропали из живого каталога
+    // (модель у провайдера переименована/убрана) — явно берём первую живую
+    // модель, а не оставляем браузеру угадывать после удаления старого option
+    select.value = `${prefix}${models[0]}`;
   }
 }
 
