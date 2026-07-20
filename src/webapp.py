@@ -359,10 +359,14 @@ def create_app(cfg: dict) -> Flask:
 
     @app.post("/settings/llm")
     def settings_llm():
-        for task, options in (("score", models_cfg.get("scoring", [])), ("tailor", models_cfg.get("tailor", []))):
+        # Валидация структурная (provider:model), а не сверка со статичным
+        # models.yaml — дропдауны теперь на загрузке страницы подтягивают живой
+        # каталог моделей у провайдера (см. JS в settings.html), там могут быть
+        # модели, которых нет в models.yaml.
+        for task in ("score", "tailor"):
             choice = request.form.get(f"llm_{task}_choice") or ""
-            valid = {f"{o['provider']}:{o['model']}" for o in options}
-            if choice not in valid:
+            provider, _, model = choice.partition(":")
+            if provider not in ("yandex", "gigachat") or not model:
                 abort(400, f"Неизвестный выбор модели для задачи {task!r}.")
             storage.set_setting(f"llm_{task}_choice", choice)
         return redirect(url_for("settings_page"))

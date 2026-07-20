@@ -151,29 +151,33 @@
 
 <h3>Модели</h3>
 <div class="chart-wrap">
-  <p>Какая модель считает score, а какая пишет резюме/письма — список моделей
-     (и провайдер каждой: Yandex/GigaChat) берётся из <code>models.yaml</code>,
-     не хардкожен здесь. Применяется сразу, без перезапуска.</p>
+  <p>Какая модель считает score, а какая пишет резюме/письма. При загрузке
+     страницы дропдауны ниже сразу подтягивают живой каталог моделей у
+     провайдера (не гадаем имя модели по докам) — <code>models.yaml</code>
+     используется только пока живой каталог ещё не пришёл или недоступен.</p>
   <form method="post" action="{{ url_for('settings_llm') }}">
     <label>Скоринг:
-      <select name="llm_score_choice">
+      <select name="llm_score_choice" id="llm-score-select" data-current="{{ score_choice }}">
         {% for m in score_models %}
         {% set v = m.provider ~ ":" ~ m.model %}
         <option value="{{ v }}" {{ "selected" if v == score_choice }}>{{ m.label }}</option>
         {% endfor %}
       </select>
+      <br><small id="models-status-score" style="color:#666;"></small>
     </label>
     <br><br>
     <label>Резюме и письма:
-      <select name="llm_tailor_choice">
+      <select name="llm_tailor_choice" id="llm-tailor-select" data-current="{{ tailor_choice }}">
         {% for m in tailor_models %}
         {% set v = m.provider ~ ":" ~ m.model %}
         <option value="{{ v }}" {{ "selected" if v == tailor_choice }}>{{ m.label }}</option>
         {% endfor %}
       </select>
+      <br><small id="models-status-tailor" style="color:#666;"></small>
     </label>
     <br><br>
     <button type="submit">Сохранить</button>
+    <button type="button" onclick="refreshModels('yandex'); refreshModels('gigachat');">🔄 Обновить списки моделей</button>
   </form>
 
   <p>Проверка связи — минимальный тестовый запрос к провайдеру, чтобы убедиться,
@@ -191,17 +195,6 @@
   {% if not gigachat_configured %}
   <p><small>GigaChat не настроен — нет секции <code>gigachat</code> в <code>config.yaml</code>.</small></p>
   {% endif %}
-
-  <p>Список моделей — реальный каталог у провайдера (не из <code>models.yaml</code>),
-     чтобы свериться, а не гадать точное имя модели:</p>
-  <div class="switch-row">
-    <button type="button" onclick="listModels('yandex')">Список моделей Yandex</button>
-  </div>
-  <div id="models-list-yandex"></div>
-  <div class="switch-row">
-    <button type="button" onclick="listModels('gigachat')" {{ "disabled" if not gigachat_configured }}>Список моделей GigaChat</button>
-  </div>
-  <div id="models-list-gigachat"></div>
 </div>
 
 <script>
@@ -221,27 +214,69 @@ async function pingProvider(provider) {
   }
 }
 
-async function listModels(provider) {
-  const box = document.getElementById(`models-list-${provider}`);
-  box.textContent = "Загружаю...";
+// Модель по умолчанию на случай, если ранее сохранённого выбора нет в живом
+// каталоге (новый провайдер, ключ только что настроен и т.п.) — те же модели,
+// что были curated-дефолтом в models.yaml.
+const DEFAULT_MODEL = {
+  yandex: {score: "yandexgpt-lite/latest", tailor: "yandexgpt/latest"},
+  gigachat: {score: "GigaChat-2", tailor: "GigaChat-2-Pro"},
+};
+const PROVIDER_LABEL = {yandex: "Yandex", gigachat: "GigaChat"};
+
+function populateSelect(select, provider, models, defaultModel) {
+  const prefix = `${provider}:`;
+  const previousValue = select.value;
+  [...select.options].filter((o) => o.value.startsWith(prefix)).forEach((o) => o.remove());
+  models.forEach((m) => {
+    const opt = document.createElement("option");
+    opt.value = `${prefix}${m}`;
+    opt.textContent = `${PROVIDER_LABEL[provider]}: ${m}`;
+    select.appendChild(opt);
+  });
+  const savedChoice = select.dataset.current;
+  if (savedChoice && savedChoice.startsWith(prefix) && models.includes(savedChoice.slice(prefix.length))) {
+    select.value = savedChoice;
+  } else if (previousValue && previousValue.startsWith(prefix) && models.includes(previousValue.slice(prefix.length))) {
+    select.value = previousValue;
+  } else if (models.includes(defaultModel)) {
+    select.value = `${prefix}${defaultModel}`;
+  }
+}
+
+// Yandex и GigaChat обновляются параллельно (см. DOMContentLoaded ниже) — каждый
+// пишет только свою часть строки статуса, чтобы они не затирали друг друга.
+const modelsStatusText = {yandex: "", gigachat: ""};
+function renderModelsStatus() {
+  const combined = ["yandex", "gigachat"].map((p) => modelsStatusText[p]).filter(Boolean).join(" | ");
+  document.getElementById("models-status-score").textContent = combined;
+  document.getElementById("models-status-tailor").textContent = combined;
+}
+
+async function refreshModels(provider) {
   try {
     const resp = await fetch(`/settings/models/list/${provider}`, {method: "POST"});
     const data = await resp.json();
     if (!data.ok) {
-      box.textContent = "Ошибка: " + data.msg;
+      modelsStatusText[provider] = `${PROVIDER_LABEL[provider]}: ошибка — ${data.msg}`;
+      renderModelsStatus();
       return;
     }
-    const ul = document.createElement("ul");
-    data.models.forEach((m) => {
-      const li = document.createElement("li");
-      li.textContent = m;
-      ul.appendChild(li);
-    });
-    box.replaceChildren(ul);
+    populateSelect(document.getElementById("llm-score-select"), provider, data.models, DEFAULT_MODEL[provider].score);
+    populateSelect(document.getElementById("llm-tailor-select"), provider, data.models, DEFAULT_MODEL[provider].tailor);
+    modelsStatusText[provider] = `${PROVIDER_LABEL[provider]}: ${data.models.length} моделей, живой каталог ✓`;
+    renderModelsStatus();
   } catch (e) {
-    box.textContent = "Ошибка запроса: " + e;
+    modelsStatusText[provider] = `${PROVIDER_LABEL[provider]}: ошибка запроса — ${e}`;
+    renderModelsStatus();
   }
 }
+
+document.addEventListener("DOMContentLoaded", () => {
+  refreshModels("yandex");
+  if ({{ "true" if gigachat_configured else "false" }}) {
+    refreshModels("gigachat");
+  }
+});
 </script>
 
 <h3>Карьерная база</h3>
