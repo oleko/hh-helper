@@ -262,6 +262,7 @@ def cmd_score(cfg: dict) -> None:
             full = json.loads(row["raw_json"])
         text = vacancy_to_text(full, priority_lines)
         result = score_vacancy(provider, career_base, text, corrections_note)
+        storage.record_token_usage(provider.name, "score", provider.last_usage)
         station, line = get_metro(full)
         metro = {"station": station, "line": line, "priority": bool(line and line in priority_lines)}
         storage.save_score(row["id"], result, metro)
@@ -285,7 +286,9 @@ def cmd_digest(cfg: dict) -> None:
 
     today = date.today().isoformat()
     try:
-        comment = build_daily_comment(get_provider(cfg, "score", storage), storage.scored_today())
+        provider = get_provider(cfg, "score", storage)
+        comment = build_daily_comment(provider, storage.scored_today())
+        storage.record_token_usage(provider.name, "digest", provider.last_usage)
         storage.save_daily_comment(today, comment)
         text = f"## Комментарий дня\n{comment}\n\n{text}"
     except Exception as e:  # noqa: BLE001
@@ -321,6 +324,7 @@ def cmd_tailor(cfg: dict, vacancy_id: str) -> None:
     full = get_full_vacancy(hh, sj, vacancy_id, row["source"])
     text = vacancy_to_text(full, priority_lines)
     notes, resume_full, letter = tailor_for_vacancy(provider, career_base, text)
+    storage.record_token_usage(provider.name, "tailor", provider.last_usage)
 
     out_dir = Path(cfg["paths"]["out_dir"]) / vacancy_id
     out_dir.mkdir(parents=True, exist_ok=True)

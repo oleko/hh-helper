@@ -76,6 +76,21 @@ CREATE TABLE IF NOT EXISTS settings (
     key    TEXT PRIMARY KEY,
     value  TEXT
 );
+
+-- лог токенов LLM-запросов (score/tailor/digest) — по одной строке на вызов
+-- provider.complete(), для счётчика в статистике. day хранится отдельной
+-- колонкой (не парсим created_at на каждый SELECT), группировка по дням —
+-- как у count_by_day().
+CREATE TABLE IF NOT EXISTS token_usage (
+    id                 INTEGER PRIMARY KEY AUTOINCREMENT,
+    created_at         TEXT,
+    day                TEXT,
+    provider           TEXT,   -- 'yandex' | 'gigachat'
+    task               TEXT,   -- 'score' | 'tailor' | 'digest'
+    prompt_tokens      INTEGER,
+    completion_tokens  INTEGER,
+    total_tokens       INTEGER
+);
 """
 
 # Колонки, добавленные после первого релиза схемы — для уже существующих БД
@@ -294,6 +309,48 @@ class Storage:
             key = r["decision"] if r["decision"] in ("fit", "not_fit") else "unsorted"
             counts[key] = counts.get(key, 0) + r["cnt"]
         return counts
+
+    def record_token_usage(self, provider: str, task: str, usage: dict | None) -> None:
+        """usage — LLMProvider.last_usage после provider.complete() (None, если
+        вызов упал до получения ответа — тогда просто ничего не пишем)."""
+        if not usage:
+            return
+        with self._conn() as conn:
+            conn.execute(
+                "INSERT INTO token_usage (created_at, day, provider, task, "
+                "prompt_tokens, completion_tokens, total_tokens) VALUES (?, ?, ?, ?, ?, ?, ?)",
+                (
+                    now_iso(),
+                    now_iso()[:10],
+                    provider,
+                    task,
+                    usage.get("prompt_tokens", 0),
+                    usage.get("completion_tokens", 0),
+                    usage.get("total_tokens", 0),
+                ),
+            )
+
+    def token_usage_by_day(self) -> list[sqlite3.Row]:
+        """Суммарные токены по дням — для графика в /stats."""
+        with self._conn() as conn:
+            return conn.execute(
+                """
+                SELECT day,
+                       SUM(total_tokens) AS total,
+                       SUM(prompt_tokens) AS prompt,
+                       SUM(completion_tokens) AS completion
+                FROM token_usage
+                GROUP BY day
+                ORDER BY day
+                """
+            ).fetchall()
+
+    def token_usage_totals(self) -> list[sqlite3.Row]:
+        """Итого токенов по провайдеру — для сводной строки над графиком."""
+        with self._conn() as conn:
+            return conn.execute(
+                "SELECT provider, SUM(total_tokens) AS total FROM token_usage GROUP BY provider"
+            ).fetchall()
 
     def count_by_day(self) -> list[sqlite3.Row]:
         """Сколько вакансий было стянуто (fetch) в каждый день — для графика."""

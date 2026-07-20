@@ -33,9 +33,20 @@ class YandexConfig:
     model: str  # напр. "yandexgpt-lite/latest" или "yandexgpt/latest"
 
 
+def _extract_usage(usage: dict) -> dict:
+    """Yandex отдаёт токены строками (inputTextTokens/completionTokens/totalTokens,
+    см. живой ответ API) — приводим к int и к именам полей, общим с GigaChat
+    (prompt_tokens/completion_tokens/total_tokens), для единого token_usage в БД."""
+    return {
+        "prompt_tokens": int(usage.get("inputTextTokens", 0)),
+        "completion_tokens": int(usage.get("completionTokens", 0)),
+        "total_tokens": int(usage.get("totalTokens", 0)),
+    }
+
+
 def complete(cfg: YandexConfig, system_prompt: str, user_content: str,
-             max_tokens: int = 1000, temperature: float = 0.3) -> str:
-    """Один запрос completion, возвращает текст ответа модели."""
+             max_tokens: int = 1000, temperature: float = 0.3) -> tuple[str, dict]:
+    """Один запрос completion — текст ответа модели + использованные токены."""
     model_uri = f"gpt://{cfg.folder_id}/{cfg.model}"
     resp = requests.post(
         COMPLETION_URL,
@@ -61,9 +72,10 @@ def complete(cfg: YandexConfig, system_prompt: str, user_content: str,
         raise RuntimeError(f"YandexGPT API {resp.status_code}: {resp.text[:300]}")
     data = resp.json()
     try:
-        return data["result"]["alternatives"][0]["message"]["text"].strip()
+        text = data["result"]["alternatives"][0]["message"]["text"].strip()
     except (KeyError, IndexError) as e:
         raise RuntimeError(f"Неожиданный формат ответа YandexGPT: {e}\n{data}") from e
+    return text, _extract_usage(data["result"].get("usage", {}))
 
 
 def complete_async(
@@ -74,7 +86,7 @@ def complete_async(
     temperature: float = 0.3,
     poll_interval: float = 1.0,
     timeout: float = 120.0,
-) -> str:
+) -> tuple[str, dict]:
     """То же самое, что complete(), но через completionAsync + polling операции —
     для cron-пайплайна (fetch → score → digest) реальное время ожидания не
     видно пользователю, так что polling не мешает. Формат запроса и итоговый
@@ -118,9 +130,10 @@ def complete_async(
             if data.get("error"):
                 raise RuntimeError(f"YandexGPT async-операция завершилась ошибкой: {data['error']}")
             try:
-                return data["response"]["alternatives"][0]["message"]["text"].strip()
+                text = data["response"]["alternatives"][0]["message"]["text"].strip()
             except (KeyError, IndexError) as e:
                 raise RuntimeError(f"Неожиданный формат ответа YandexGPT (async): {e}\n{data}") from e
+            return text, _extract_usage(data["response"].get("usage", {}))
         if time.monotonic() >= deadline:
             raise RuntimeError(
                 f"YandexGPT async-операция не завершилась за {timeout:.0f} сек (operation_id={operation_id})"
@@ -149,7 +162,7 @@ def ping(cfg: YandexConfig) -> tuple[bool, str]:
     """Минимальный синхронный запрос — для кнопки проверки связи в /settings.
     Не использует complete_async, чтобы результат был виден сразу же."""
     try:
-        text = complete(cfg, "Ответь одним словом.", "Скажи 'ок'.", max_tokens=16, temperature=0)
+        text, _usage = complete(cfg, "Ответь одним словом.", "Скажи 'ок'.", max_tokens=16, temperature=0)
         return True, text or "(пустой ответ)"
     except Exception as e:
         return False, str(e)
@@ -160,13 +173,17 @@ class YandexProvider(LLMProvider):
     scorer.py/tailor.py/digest.py зовут provider.complete(...) одинаково,
     не зная ни про какого провайдера, ни про sync/async режим."""
 
+    name = "yandex"
+
     def __init__(self, cfg: YandexConfig, mode: str = "sync"):
         self.cfg = cfg
         self.mode = mode
+        self.last_usage: dict | None = None
 
     def complete(
         self, system_prompt: str, user_content: str, max_tokens: int = 1000, temperature: float = 0.3
     ) -> str:
-        if self.mode == "async":
-            return complete_async(self.cfg, system_prompt, user_content, max_tokens, temperature)
-        return complete(self.cfg, system_prompt, user_content, max_tokens, temperature)
+        fn = complete_async if self.mode == "async" else complete
+        text, usage = fn(self.cfg, system_prompt, user_content, max_tokens, temperature)
+        self.last_usage = usage
+        return text

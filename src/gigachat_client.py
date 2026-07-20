@@ -36,8 +36,8 @@ def complete(
     model: str,
     max_tokens: int = 1000,
     temperature: float = 0.3,
-) -> str:
-    """Один запрос completion, возвращает текст ответа модели."""
+) -> tuple[str, dict]:
+    """Один запрос completion — текст ответа модели + использованные токены."""
     with GigaChat(
         credentials=cfg.credentials,
         scope=cfg.scope,
@@ -56,7 +56,12 @@ def complete(
         )
     if not response.choices:
         raise RuntimeError(f"Пустой ответ GigaChat (нет choices): {response}")
-    return response.choices[0].message.content.strip()
+    usage = {
+        "prompt_tokens": response.usage.prompt_tokens,
+        "completion_tokens": response.usage.completion_tokens,
+        "total_tokens": response.usage.total_tokens,
+    }
+    return response.choices[0].message.content.strip(), usage
 
 
 def list_models(cfg: GigaChatConfig) -> list[str]:
@@ -69,7 +74,7 @@ def list_models(cfg: GigaChatConfig) -> list[str]:
 def ping(cfg: GigaChatConfig, model: str) -> tuple[bool, str]:
     """Минимальный синхронный запрос — для кнопки проверки связи в /settings."""
     try:
-        text = complete(cfg, "Ответь одним словом.", "Скажи 'ок'.", model, max_tokens=16, temperature=0)
+        text, _usage = complete(cfg, "Ответь одним словом.", "Скажи 'ок'.", model, max_tokens=16, temperature=0)
         return True, text or "(пустой ответ)"
     except Exception as e:
         return False, str(e)
@@ -79,11 +84,16 @@ class GigaChatProvider(LLMProvider):
     """Обёртка под интерфейс LLMProvider — scorer.py/tailor.py/digest.py зовут
     provider.complete(...) одинаково для Yandex и для GigaChat."""
 
+    name = "gigachat"
+
     def __init__(self, cfg: GigaChatConfig, model: str):
         self.cfg = cfg
         self.model = model
+        self.last_usage: dict | None = None
 
     def complete(
         self, system_prompt: str, user_content: str, max_tokens: int = 1000, temperature: float = 0.3
     ) -> str:
-        return complete(self.cfg, system_prompt, user_content, self.model, max_tokens, temperature)
+        text, usage = complete(self.cfg, system_prompt, user_content, self.model, max_tokens, temperature)
+        self.last_usage = usage
+        return text

@@ -254,12 +254,20 @@ def create_app(cfg: dict) -> Flask:
             for w, vals in sorted(week_buckets.items())
         ]
 
+        token_days = [
+            {"day": r["day"], "total": r["total"] or 0, "prompt": r["prompt"] or 0, "completion": r["completion"] or 0}
+            for r in storage.token_usage_by_day()
+        ]
+        token_totals = {r["provider"]: r["total"] or 0 for r in storage.token_usage_totals()}
+
         return render_template(
             "stats.html",
             days=days,
             salary_stats=salary_stats,
             salary_buckets=salary_buckets,
             salary_weekly=salary_weekly,
+            token_days=token_days,
+            token_totals=token_totals,
         )
 
     @app.context_processor
@@ -520,9 +528,9 @@ def create_app(cfg: dict) -> Flask:
         """Общий код генерации 4 файлов (notes/resume_full/letter/docx) —
         используется и обычной кнопкой на карточке, и инструментом "вакансия
         по ссылке" (см. score_url_submit)."""
-        notes, resume_full, letter = tailor_for_vacancy(
-            get_provider(cfg, "tailor", storage), career_state["text"], text
-        )
+        provider = get_provider(cfg, "tailor", storage)
+        notes, resume_full, letter = tailor_for_vacancy(provider, career_state["text"], text)
+        storage.record_token_usage(provider.name, "tailor", provider.last_usage)
         v_out_dir = out_dir / vacancy_id
         v_out_dir.mkdir(parents=True, exist_ok=True)
         (v_out_dir / "resume_notes.md").write_text(notes, encoding="utf-8")
@@ -682,9 +690,9 @@ def create_app(cfg: dict) -> Flask:
         text = vacancy_to_text(full, priority_lines)
         if row["score"] is None:
             corrections_note = build_corrections_note(storage.disagreements())
-            result = score_vacancy(
-                get_provider(cfg, "score", storage), career_state["text"], text, corrections_note
-            )
+            provider = get_provider(cfg, "score", storage)
+            result = score_vacancy(provider, career_state["text"], text, corrections_note)
+            storage.record_token_usage(provider.name, "score", provider.last_usage)
             station, line = get_metro(full)
             metro = {"station": station, "line": line, "priority": bool(line and line in priority_lines)}
             storage.save_score(vacancy_id, result, metro)

@@ -15,6 +15,13 @@ from abc import ABC, abstractmethod
 
 
 class LLMProvider(ABC):
+    # Строковое имя провайдера ('yandex'/'gigachat') и токены последнего
+    # complete()-вызова ({"prompt_tokens", "completion_tokens", "total_tokens"},
+    # None пока ничего не вызывалось) — читаются вызывающим кодом сразу после
+    # complete() для записи в storage.record_token_usage(), см. main.py/webapp.py.
+    name: str
+    last_usage: dict | None = None
+
     @abstractmethod
     def complete(
         self, system_prompt: str, user_content: str, max_tokens: int = 1000, temperature: float = 0.3
