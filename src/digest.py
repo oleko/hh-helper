@@ -4,8 +4,8 @@ from __future__ import annotations
 import json
 from datetime import date
 
+from .llm_provider import LLMProvider
 from .storage import Storage
-from .yandex_client import YandexConfig, complete
 
 RECOMMEND_LABEL = {
     "respond": "🟢 откликаться",
@@ -21,8 +21,8 @@ DAILY_COMMENT_SYSTEM_PROMPT = """Ты — карьерный консульта�
 на что-то конкретное. Без канцелярита, без markdown-разметки, на "ты", по существу."""
 
 
-def build_daily_comment(ycfg: YandexConfig, rows: list) -> str:
-    """Короткий комментарий от YandexGPT по вакансиям, оценённым сегодня."""
+def build_daily_comment(provider: LLMProvider, rows: list) -> str:
+    """Короткий комментарий от модели по вакансиям, оценённым сегодня."""
     if not rows:
         return "Сегодня новых оценённых вакансий не было."
     lines = [
@@ -31,7 +31,7 @@ def build_daily_comment(ycfg: YandexConfig, rows: list) -> str:
         for r in rows
     ]
     user_content = "Вакансии, оценённые сегодня:\n" + "\n".join(lines)
-    return complete(ycfg, DAILY_COMMENT_SYSTEM_PROMPT, user_content, max_tokens=350, temperature=0.6)
+    return provider.complete(DAILY_COMMENT_SYSTEM_PROMPT, user_content, max_tokens=350, temperature=0.6)
 
 
 def build_digest(storage: Storage, min_score: int, top_n: int) -> str:

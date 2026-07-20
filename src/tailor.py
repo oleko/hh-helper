@@ -14,7 +14,7 @@ from __future__ import annotations
 import logging
 import re
 
-from .yandex_client import YandexConfig, complete
+from .llm_provider import LLMProvider
 
 log = logging.getLogger("tailor")
 
@@ -121,7 +121,7 @@ def _split_sections(raw: str) -> tuple[str, str, str]:
     return _strip_label(notes), _strip_label(resume_full), _strip_label(letter)
 
 
-def tailor_for_vacancy(cfg: YandexConfig, career_base_md: str, vacancy_text: str) -> tuple[str, str, str]:
+def tailor_for_vacancy(provider: LLMProvider, career_base_md: str, vacancy_text: str) -> tuple[str, str, str]:
     """Возвращает (resume_notes, resume_full, cover_letter)."""
     user_content = (
         f"КАРЬЕРНАЯ БАЗА КАНДИДАТА:\n{career_base_md}\n\n"
@@ -129,5 +129,5 @@ def tailor_for_vacancy(cfg: YandexConfig, career_base_md: str, vacancy_text: str
         "Дай resume_notes, resume_full и cover_letter по формату из системного промпта, "
         "раздели их строкой из трёх дефисов ---."
     )
-    raw = complete(cfg, SYSTEM_PROMPT, user_content, max_tokens=4000, temperature=0.4)
+    raw = provider.complete(SYSTEM_PROMPT, user_content, max_tokens=4000, temperature=0.4)
     return _split_sections(raw)

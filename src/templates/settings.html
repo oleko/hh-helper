@@ -5,20 +5,22 @@
 
 <h3>Сбор вакансий</h3>
 <div class="chart-wrap">
-  {% if collection_paused %}
-  <p>⏸ Сбор новых вакансий сейчас <strong>на паузе</strong> — запланированный <code>fetch</code>
-     (см. cron) ничего не скачивает, пока не нажмёшь «Возобновить».</p>
-  <form method="post" action="{{ url_for('settings_collection') }}">
-    <input type="hidden" name="action" value="resume">
-    <button type="submit">▶ Возобновить сбор</button>
-  </form>
-  {% else %}
-  <p>▶ Сбор новых вакансий сейчас идёт по расписанию как обычно.</p>
-  <form method="post" action="{{ url_for('settings_collection') }}">
-    <input type="hidden" name="action" value="pause">
-    <button type="submit">⏸ Поставить на паузу</button>
-  </form>
-  {% endif %}
+  <div class="switch-row">
+    <form method="post" action="{{ url_for('settings_collection') }}">
+      <input type="hidden" name="action" value="{{ 'pause' if not collection_paused else 'resume' }}">
+      <label class="switch">
+        <input type="checkbox" {{ "checked" if not collection_paused }} onchange="this.form.submit()">
+        <span class="slider"></span>
+      </label>
+    </form>
+    <span>
+      {% if collection_paused %}
+      ⏸ Сбор новых вакансий <strong>на паузе</strong> — запланированный <code>fetch</code> (см. cron) ничего не скачивает.
+      {% else %}
+      ▶ Сбор новых вакансий идёт по расписанию как обычно.
+      {% endif %}
+    </span>
+  </div>
 </div>
 
 <h3>Источники вакансий</h3>
@@ -87,6 +89,39 @@
                 >{{ metro_lines_text }}</textarea>
     </label>
     <br><br>
+    <p style="color:#666; font-size:0.85rem; margin:0 0 0.3rem;">Ничего не отмечено в категории —
+       фильтр по ней не применяется (ищем без ограничения). На SuperJob из каждой
+       категории учитывается только первый отмеченный пункт — там нет мультивыбора.</p>
+    <div style="display:flex; gap:2rem; flex-wrap:wrap;">
+      <div>
+        <strong>Опыт работы</strong><br>
+        {% for o in experience_options %}
+        <label style="display:block; font-weight:normal;">
+          <input type="checkbox" name="filter_experience" value="{{ o.key }}"
+                 {{ "checked" if o.key in filter_experience }}> {{ o.label }}
+        </label>
+        {% endfor %}
+      </div>
+      <div>
+        <strong>Занятость</strong><br>
+        {% for o in employment_options %}
+        <label style="display:block; font-weight:normal;">
+          <input type="checkbox" name="filter_employment" value="{{ o.key }}"
+                 {{ "checked" if o.key in filter_employment }}> {{ o.label }}
+        </label>
+        {% endfor %}
+      </div>
+      <div>
+        <strong>График</strong><br>
+        {% for o in schedule_options %}
+        <label style="display:block; font-weight:normal;">
+          <input type="checkbox" name="filter_schedule" value="{{ o.key }}"
+                 {{ "checked" if o.key in filter_schedule }}> {{ o.label }}
+        </label>
+        {% endfor %}
+      </div>
+    </div>
+    <br>
     <button type="submit">Сохранить</button>
   </form>
 </div>
@@ -113,6 +148,101 @@
     <button type="submit">Сохранить</button>
   </form>
 </div>
+
+<h3>Модели</h3>
+<div class="chart-wrap">
+  <p>Какая модель считает score, а какая пишет резюме/письма — список моделей
+     (и провайдер каждой: Yandex/GigaChat) берётся из <code>models.yaml</code>,
+     не хардкожен здесь. Применяется сразу, без перезапуска.</p>
+  <form method="post" action="{{ url_for('settings_llm') }}">
+    <label>Скоринг:
+      <select name="llm_score_choice">
+        {% for m in score_models %}
+        {% set v = m.provider ~ ":" ~ m.model %}
+        <option value="{{ v }}" {{ "selected" if v == score_choice }}>{{ m.label }}</option>
+        {% endfor %}
+      </select>
+    </label>
+    <br><br>
+    <label>Резюме и письма:
+      <select name="llm_tailor_choice">
+        {% for m in tailor_models %}
+        {% set v = m.provider ~ ":" ~ m.model %}
+        <option value="{{ v }}" {{ "selected" if v == tailor_choice }}>{{ m.label }}</option>
+        {% endfor %}
+      </select>
+    </label>
+    <br><br>
+    <button type="submit">Сохранить</button>
+  </form>
+
+  <p>Проверка связи — минимальный тестовый запрос к провайдеру, чтобы убедиться,
+     что ключ и доступ реально работают:</p>
+  <div class="switch-row">
+    <span class="status-dot status-unknown" id="ping-dot-yandex"></span>
+    <button type="button" onclick="pingProvider('yandex')">Проверить Yandex</button>
+    <span id="ping-msg-yandex"></span>
+  </div>
+  <div class="switch-row">
+    <span class="status-dot status-unknown" id="ping-dot-gigachat"></span>
+    <button type="button" onclick="pingProvider('gigachat')" {{ "disabled" if not gigachat_configured }}>Проверить GigaChat</button>
+    <span id="ping-msg-gigachat"></span>
+  </div>
+  {% if not gigachat_configured %}
+  <p><small>GigaChat не настроен — нет секции <code>gigachat</code> в <code>config.yaml</code>.</small></p>
+  {% endif %}
+
+  <p>Список моделей — реальный каталог у провайдера (не из <code>models.yaml</code>),
+     чтобы свериться, а не гадать точное имя модели:</p>
+  <div class="switch-row">
+    <button type="button" onclick="listModels('yandex')">Список моделей Yandex</button>
+  </div>
+  <div id="models-list-yandex"></div>
+  <div class="switch-row">
+    <button type="button" onclick="listModels('gigachat')" {{ "disabled" if not gigachat_configured }}>Список моделей GigaChat</button>
+  </div>
+  <div id="models-list-gigachat"></div>
+</div>
+
+<script>
+async function pingProvider(provider) {
+  const dot = document.getElementById(`ping-dot-${provider}`);
+  const msg = document.getElementById(`ping-msg-${provider}`);
+  dot.className = "status-dot status-unknown";
+  msg.textContent = "Проверяю...";
+  try {
+    const resp = await fetch(`/settings/ping/${provider}`, {method: "POST"});
+    const data = await resp.json();
+    dot.className = `status-dot ${data.ok ? "status-ok" : "status-fail"}`;
+    msg.textContent = data.msg;
+  } catch (e) {
+    dot.className = "status-dot status-fail";
+    msg.textContent = "Ошибка запроса: " + e;
+  }
+}
+
+async function listModels(provider) {
+  const box = document.getElementById(`models-list-${provider}`);
+  box.textContent = "Загружаю...";
+  try {
+    const resp = await fetch(`/settings/models/list/${provider}`, {method: "POST"});
+    const data = await resp.json();
+    if (!data.ok) {
+      box.textContent = "Ошибка: " + data.msg;
+      return;
+    }
+    const ul = document.createElement("ul");
+    data.models.forEach((m) => {
+      const li = document.createElement("li");
+      li.textContent = m;
+      ul.appendChild(li);
+    });
+    box.replaceChildren(ul);
+  } catch (e) {
+    box.textContent = "Ошибка запроса: " + e;
+  }
+}
+</script>
 
 <h3>Карьерная база</h3>
 <div class="chart-wrap">

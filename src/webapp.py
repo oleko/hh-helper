@@ -22,19 +22,24 @@ from datetime import datetime, timedelta
 from pathlib import Path
 
 import bleach
-from flask import Flask, abort, redirect, render_template, request, send_file, session, url_for
+from flask import Flask, abort, jsonify, redirect, render_template, request, send_file, session, url_for
 
 log = logging.getLogger("webapp")
 
 from .docx_export import build_resume_docx, extract_candidate_name
+from .filters import EMPLOYMENT_OPTIONS, EXPERIENCE_OPTIONS, SCHEDULE_OPTIONS
 from .geo import CITIES, flatten_hh_areas, flatten_superjob_towns
 from .hh_client import HHApiError, HHClient
+from .llm_provider import get_provider
 from .main import (
+    get_filter_selection,
+    get_gigachat_config,
     get_hh_config,
     get_priority_metro_lines,
     get_superjob_config,
     get_yandex_config,
     load_career_base,
+    load_models_config,
     refresh_vacancy_status,
 )
 from .scorer import build_corrections_note, get_metro, score_vacancy, vacancy_to_text
@@ -86,8 +91,10 @@ def _format_salary_range(row) -> str | None:
     return f"до {_format_rur(hi)} {label}".strip()
 
 
-def _row_to_view(row) -> dict:
+def _row_to_view(row, out_dir: Path | None = None) -> dict:
+    has_tailor = bool(out_dir) and (out_dir / row["id"] / "resume_notes.md").exists()
     return {
+        "has_tailor": has_tailor,
         "id": row["id"],
         "name": row["name"],
         "employer": row["employer"],
@@ -130,6 +137,9 @@ def create_app(cfg: dict) -> Flask:
     # контейнер, простое переприсваивание в closure тут не сработает)
     career_state = {"text": load_career_base(str(career_base_path))}
     career_state["candidate_name"] = extract_candidate_name(career_state["text"])
+    # models.yaml — не секрет, справочник моделей для /settings; читается один раз
+    # при старте (перечень моделей меняется редко, в отличие от career_base)
+    models_cfg = load_models_config()
     # плоские справочники городов для /tool/areas — тянутся из API один раз и
     # держатся в памяти процесса (справочники регионов меняются очень редко,
     # перечитывать их на каждый запрос смысла нет; сбрасывается перезапуском serve)
@@ -138,12 +148,16 @@ def create_app(cfg: dict) -> Flask:
     # относительные пути в send_file от root_path пакета (src/), а не от рабочей
     # директории процесса, так что "./out" тихо ломался на скачивании .docx.
     out_dir = Path(cfg["paths"]["out_dir"]).resolve()
-    # получаем конфиг модели один раз при старте — если ключ/folder_id не заданы,
-    # процесс упадёт сразу при запуске serve, а не посреди случайного запроса
-    tailor_ycfg = get_yandex_config(cfg, cfg["yandex"]["tailor_model"])
+    # получаем конфиг модели по умолчанию один раз при старте — просто чтобы
+    # процесс упал сразу при запуске serve, если ключ/folder_id не заданы,
+    # а не посреди случайного запроса; сам провайдер на каждый tailor-запрос
+    # выбирается заново через get_provider(cfg, "tailor", storage) — модель
+    # можно сменить в /settings, пока serve уже работает (см. ниже, как и с
+    # линиями метро)
+    get_provider(cfg, "tailor")
     # линии метро — настройка, которая может поменяться через /settings, пока
     # серверный процесс уже запущен, поэтому читаем её каждый раз заново из
-    # storage, а не кэшируем в closure (в отличие от tailor_ycfg/career_state)
+    # storage, а не кэшируем в closure (в отличие от tailor_provider/career_state)
 
     w = cfg["webapp"]
     login_user = os.environ.get(w["login_user_env"])
@@ -266,7 +280,7 @@ def create_app(cfg: dict) -> Flask:
             status=status, min_score=min_score, decision=decision, sort=sort,
             limit=PAGE_SIZE, offset=(page_num - 1) * PAGE_SIZE,
         )
-        vacancies = [_row_to_view(r) for r in rows]
+        vacancies = [_row_to_view(r, out_dir) for r in rows]
         daily_comment_row = storage.get_latest_daily_comment() if page == "unsorted" else None
         return render_template(
             "list.html",
@@ -319,8 +333,86 @@ def create_app(cfg: dict) -> Flask:
             search_superjob_town=search_superjob_town,
             search_salary_from=search_salary_from,
             metro_lines_text=metro_lines_text,
+            experience_options=EXPERIENCE_OPTIONS,
+            employment_options=EMPLOYMENT_OPTIONS,
+            schedule_options=SCHEDULE_OPTIONS,
+            filter_experience=get_filter_selection(storage, "experience"),
+            filter_employment=get_filter_selection(storage, "employment"),
+            filter_schedule=get_filter_selection(storage, "schedule"),
+            score_models=models_cfg.get("scoring", []),
+            tailor_models=models_cfg.get("tailor", []),
+            score_choice=storage.get_setting("llm_score_choice") or _default_llm_choice("score"),
+            tailor_choice=storage.get_setting("llm_tailor_choice") or _default_llm_choice("tailor"),
             career_base=career_state["text"],
+            gigachat_configured=bool(cfg.get("gigachat")),
         )
+
+    def _default_llm_choice(task: str) -> str:
+        """"provider:model", который реально используется, пока на /settings ничего
+        не выбрано — чтобы дропдаун по умолчанию показывал текущее поведение
+        (см. get_provider в llm_provider.py — та же логика вычисления модели)."""
+        llm_cfg = cfg.get("llm") or {}
+        provider = llm_cfg.get(f"{task}_provider") or llm_cfg.get("provider", "yandex")
+        model_key = "scorer_model" if task == "score" else f"{task}_model"
+        model = cfg["yandex"][model_key] if provider == "yandex" else (cfg.get(provider) or {}).get(model_key, "")
+        return f"{provider}:{model}"
+
+    @app.post("/settings/llm")
+    def settings_llm():
+        for task, options in (("score", models_cfg.get("scoring", [])), ("tailor", models_cfg.get("tailor", []))):
+            choice = request.form.get(f"llm_{task}_choice") or ""
+            valid = {f"{o['provider']}:{o['model']}" for o in options}
+            if choice not in valid:
+                abort(400, f"Неизвестный выбор модели для задачи {task!r}.")
+            storage.set_setting(f"llm_{task}_choice", choice)
+        return redirect(url_for("settings_page"))
+
+    @app.post("/settings/ping/<provider>")
+    def settings_ping(provider):
+        """Минимальный реальный запрос к провайдеру — чтобы проверить, что ключ/
+        доступ реально работают, не дожидаясь первого fetch/score по расписанию.
+        Вызывается через fetch() из settings.html — без перезагрузки страницы."""
+        if provider not in ("yandex", "gigachat"):
+            abort(404)
+        if provider == "yandex":
+            from .yandex_client import ping as yandex_ping
+
+            try:
+                ycfg = get_yandex_config(cfg, cfg["yandex"]["scorer_model"])
+                ok, msg = yandex_ping(ycfg)
+            except SystemExit as e:
+                ok, msg = False, str(e)
+        else:
+            from .gigachat_client import ping as gigachat_ping
+
+            try:
+                gcfg = get_gigachat_config(cfg)
+                model = (cfg.get("gigachat") or {}).get("scorer_model", "GigaChat-2")
+                ok, msg = gigachat_ping(gcfg, model)
+            except SystemExit as e:
+                ok, msg = False, str(e)
+        return jsonify({"ok": ok, "msg": msg[:300]})
+
+    @app.post("/settings/models/list/<provider>")
+    def settings_models_list(provider):
+        """Реальный каталог моделей аккаунта у провайдера — чтобы сверять
+        models.yaml с тем, что Yandex/GigaChat отдают по факту, а не гадать."""
+        if provider not in ("yandex", "gigachat"):
+            abort(404)
+        try:
+            if provider == "yandex":
+                from .yandex_client import list_models as yandex_list_models
+
+                models = yandex_list_models(get_yandex_config(cfg, cfg["yandex"]["scorer_model"]))
+            else:
+                from .gigachat_client import list_models as gigachat_list_models
+
+                models = gigachat_list_models(get_gigachat_config(cfg))
+            return jsonify({"ok": True, "models": models})
+        except SystemExit as e:
+            return jsonify({"ok": False, "msg": str(e)})
+        except Exception as e:
+            return jsonify({"ok": False, "msg": str(e)})
 
     @app.post("/settings/backup-keep")
     def settings_backup_keep():
@@ -374,6 +466,15 @@ def create_app(cfg: dict) -> Flask:
 
         lines = [ln.strip() for ln in (request.form.get("priority_metro_lines") or "").splitlines() if ln.strip()]
         storage.set_setting("priority_metro_lines", json.dumps(lines, ensure_ascii=False))
+
+        for category, options in (
+            ("experience", EXPERIENCE_OPTIONS),
+            ("employment", EMPLOYMENT_OPTIONS),
+            ("schedule", SCHEDULE_OPTIONS),
+        ):
+            valid_keys = {o["key"] for o in options}
+            selected = [k for k in request.form.getlist(f"filter_{category}") if k in valid_keys]
+            storage.set_setting(f"filter_{category}", json.dumps(selected, ensure_ascii=False))
         return redirect(url_for("settings_page"))
 
     @app.post("/settings/sources")
@@ -415,7 +516,9 @@ def create_app(cfg: dict) -> Flask:
         """Общий код генерации 4 файлов (notes/resume_full/letter/docx) —
         используется и обычной кнопкой на карточке, и инструментом "вакансия
         по ссылке" (см. score_url_submit)."""
-        notes, resume_full, letter = tailor_for_vacancy(tailor_ycfg, career_state["text"], text)
+        notes, resume_full, letter = tailor_for_vacancy(
+            get_provider(cfg, "tailor", storage), career_state["text"], text
+        )
         v_out_dir = out_dir / vacancy_id
         v_out_dir.mkdir(parents=True, exist_ok=True)
         (v_out_dir / "resume_notes.md").write_text(notes, encoding="utf-8")
@@ -461,7 +564,7 @@ def create_app(cfg: dict) -> Flask:
         letter = letter_path.read_text(encoding="utf-8") if letter_path.exists() else None
         return render_template(
             "detail.html",
-            v=_row_to_view(row),
+            v=_row_to_view(row, out_dir),
             description_html=description_html,
             unavailable_notice=unavailable_notice,
             notes=notes,
@@ -574,9 +677,10 @@ def create_app(cfg: dict) -> Flask:
         priority_lines = get_priority_metro_lines(storage)
         text = vacancy_to_text(full, priority_lines)
         if row["score"] is None:
-            scorer_ycfg = get_yandex_config(cfg, cfg["yandex"]["scorer_model"])
             corrections_note = build_corrections_note(storage.disagreements())
-            result = score_vacancy(scorer_ycfg, career_state["text"], text, corrections_note)
+            result = score_vacancy(
+                get_provider(cfg, "score", storage), career_state["text"], text, corrections_note
+            )
             station, line = get_metro(full)
             metro = {"station": station, "line": line, "priority": bool(line and line in priority_lines)}
             storage.save_score(vacancy_id, result, metro)

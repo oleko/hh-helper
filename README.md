@@ -175,13 +175,21 @@ to any port 8765`) до своего IP, либо поставь Caddy/nginx с 
 странице «Настройки» веб-интерфейса (город выбирается из готового списка, id
 для hh.ru и SuperJob подставляются автоматически; для города не из списка есть
 поле для ручного ввода id). Применяется сразу, без перезапуска.
-- `yandex.scorer_model`/`yandex.tailor_model` — модели YandexGPT (по умолчанию
-  дешёвая lite для скоринга, полная для резюме/писем).
+- `yandex.scorer_model`/`yandex.tailor_model` — модели YandexGPT по умолчанию
+  (дешёвая lite для скоринга, полная для резюме/писем) — реальный выбор модели
+  и провайдера (Yandex/GigaChat) теперь на странице «Настройки» → «Модели»,
+  список моделей берётся из `models.yaml`, а не отсюда.
+- `llm.provider`/`llm.mode` — провайдер по умолчанию (пока ничего не выбрано в
+  UI) и режим sync/async у Yandex (`src/llm_provider.py`, `src/yandex_client.py`).
+- `gigachat.*` — опциональный второй LLM-провайдер (`src/gigachat_client.py`,
+  официальная библиотека `pip install gigachat`). Убери всю секцию, если не
+  нужен вообще; `credentials_env` указывает на переменную в `.env` с
+  Authorization key из личного кабинета Sber Studio.
 - `hh.user_agent` — контактная строка для HH API (обязательна по их правилам).
 
 **`.env`** (секреты, никогда не коммитить):
-- `YANDEX_API_KEY`, `HH_CLIENT_ID`/`HH_CLIENT_SECRET`, `SUPERJOB_SECRET_KEY` —
-  ключи API трёх сервисов.
+- `YANDEX_API_KEY`, `HH_CLIENT_ID`/`HH_CLIENT_SECRET`, `SUPERJOB_SECRET_KEY`,
+  `GIGACHAT_CREDENTIALS` (опционально) — ключи API сервисов.
 - `WEBAPP_USER`/`WEBAPP_PASSWORD` — логин для веб-интерфейса.
 - `WEBAPP_SECRET_KEY` — подписывает cookie сессии (нужен только для `serve`).
 

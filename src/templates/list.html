@@ -29,6 +29,8 @@
     <li>🚇 — метро вакансии на приоритетной для тебя линии</li>
     <li>🗄 — по последней проверке вакансия в архиве/снята с публикации на источнике
         (hh.ru/SuperJob; не путать со страницей «Архив» — она про твоё решение)</li>
+    <li>📝 — резюме и письмо для этой вакансии уже подготовлены (генерируются только
+        по клику на карточке, автоматически — никогда)</li>
     <li>👍 «Подходит» / 👎 «Не подходит» — твоё собственное решение по вакансии
         (кнопки прямо в таблице, не путать с бейджем рекомендации модели выше).
         Три раздела в шапке — «Разбор» (без решения), «Подходит» (👍),
@@ -75,7 +77,8 @@
       <td class="score">{{ v.score }}</td>
       <td><a href="{{ url_for('vacancy_detail', vacancy_id=v.id) }}">{{ v.name }}</a>
           {% if v.status == "new" %}<span class="chip" style="background:#0b5fff;">NEW</span>{% endif %}
-          {% if v.metro_priority %}🚇{% endif %}{% if v.archived %}🗄{% endif %}<br>
+          {% if v.metro_priority %}🚇{% endif %}{% if v.archived %}🗄{% endif %}
+          {% if v.has_tailor %}<span title="Резюме и письмо уже подготовлены">📝</span>{% endif %}<br>
           <small>{{ v.employer or "—" }}{% if v.metro_station %} · {{ v.metro_station }}{% endif %}
           {%- if v.published_at %} · {{ v.published_at[:10] }}{% endif %} · {{ v.source_label }}</small></td>
       <td>{{ v.track or "?" }}</td>

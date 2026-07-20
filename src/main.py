@@ -27,7 +27,16 @@ from pathlib import Path
 import yaml
 from dotenv import load_dotenv
 
+from .filters import (
+    EMPLOYMENT_OPTIONS,
+    EXPERIENCE_OPTIONS,
+    SCHEDULE_OPTIONS,
+    hh_values,
+    sj_experience_or_employment,
+    sj_schedule_params,
+)
 from .hh_client import HHClient, HHConfig
+from .llm_provider import get_provider
 from .storage import Storage
 from .superjob_client import SuperJobClient, SuperJobConfig
 from .sources import get_full_vacancy, get_vacancy_status
@@ -42,6 +51,13 @@ log = logging.getLogger("main")
 
 
 def load_config(path: str = "config.yaml") -> dict:
+    with open(path, encoding="utf-8") as f:
+        return yaml.safe_load(f)
+
+
+def load_models_config(path: str = "models.yaml") -> dict:
+    """Список моделей для выбора на /settings (по задачам: scoring/tailor) —
+    не секрет, обычный справочник, можно смело коммитить и редактировать."""
     with open(path, encoding="utf-8") as f:
         return yaml.safe_load(f)
 
@@ -84,10 +100,38 @@ def get_hh_config(cfg: dict) -> HHConfig:
     return HHConfig(client_id=client_id, client_secret=client_secret, user_agent=h["user_agent"])
 
 
+def get_gigachat_config(cfg: dict):
+    """GigaChat — опциональный второй LLM-провайдер, читается только если реально
+    выбран в /settings или в config.yaml (llm.provider/score_provider/tailor_provider),
+    см. get_provider() в llm_provider.py. Секция gigachat в config.yaml обязательна
+    в этот момент (в отличие от superjob — там источник можно не подключать вовсе)."""
+    from .gigachat_client import GigaChatConfig
+
+    g = cfg.get("gigachat")
+    if not g:
+        raise SystemExit(
+            "Выбран провайдер gigachat, но в config.yaml нет секции gigachat "
+            "(credentials_env, опционально scope) — см. config.example.yaml."
+        )
+    credentials = os.environ.get(g["credentials_env"])
+    if not credentials:
+        raise SystemExit(
+            f"Не задан {g['credentials_env']} в .env — нужен Authorization key из личного "
+            "кабинета Sber Studio (https://developers.sber.ru/studio/)."
+        )
+    return GigaChatConfig(credentials=credentials, scope=g.get("scope", "GIGACHAT_API_PERS"))
+
+
 def get_priority_metro_lines(storage: Storage) -> list[str]:
     """Линии метро, дающие небольшой плюс к score — настраиваются на странице
     «Настройки», не в config.yaml (см. settings_search в webapp.py)."""
     return json.loads(storage.get_setting("priority_metro_lines", "[]"))
+
+
+def get_filter_selection(storage: Storage, category: str) -> list[str]:
+    """category: "experience" | "employment" | "schedule" — список выбранных
+    ключей опций (см. src/filters.py), настраивается на странице «Настройки»."""
+    return json.loads(storage.get_setting(f"filter_{category}", "[]"))
 
 
 def get_superjob_config(cfg: dict) -> SuperJobConfig | None:
@@ -112,12 +156,15 @@ def cmd_fetch(cfg: dict) -> None:
     s = cfg["search"]
     total_new = 0
 
-    # город и зарплатный порог — настраиваются на странице «Настройки» (веб-интерфейс),
-    # не в config.yaml, чтобы человек без техфона мог выбрать город из списка,
-    # а не искать числовой id региона в JSON-справочнике HH/SuperJob вручную.
+    # город, зарплатный порог и фильтры опыта/занятости/графика — настраиваются
+    # на странице «Настройки» (веб-интерфейс), не в config.yaml, чтобы человек
+    # без техфона мог выбрать всё из списков, а не искать значения в доке API.
     search_area = storage.get_setting("search_area", "1")            # 1 = Москва
     superjob_town = storage.get_setting("superjob_town", "4") or None  # 4 = Москва
     salary_from = int(storage.get_setting("search_salary_from", "0") or 0)
+    filter_experience = get_filter_selection(storage, "experience")
+    filter_employment = get_filter_selection(storage, "employment")
+    filter_schedule = get_filter_selection(storage, "schedule")
 
     if storage.get_setting("source_hh_enabled", "1") == "1":
         hh = HHClient(get_hh_config(cfg))
@@ -127,9 +174,9 @@ def cmd_fetch(cfg: dict) -> None:
                 "text": query,
                 "search_field": s.get("search_field") or None,
                 "area": search_area,
-                "employment": s.get("employment"),
-                "schedule": s.get("schedule"),
-                "experience": s.get("experience"),
+                "employment": hh_values(EMPLOYMENT_OPTIONS, filter_employment) or None,
+                "schedule": hh_values(SCHEDULE_OPTIONS, filter_schedule) or None,
+                "experience": hh_values(EXPERIENCE_OPTIONS, filter_experience) or None,
                 "salary": salary_from or None,
                 "currency": s.get("currency"),
                 "only_with_salary": "true" if s.get("only_with_salary") else None,
@@ -150,6 +197,15 @@ def cmd_fetch(cfg: dict) -> None:
 
     if storage.get_setting("source_superjob_enabled", "1") == "1" and cfg.get("superjob"):
         sj = SuperJobClient(get_superjob_config(cfg))
+        # SuperJob не поддерживает мультивыбор в этих категориях (см. src/filters.py) —
+        # берём первый применимый вариант на категорию; при конфликте на параметре
+        # type_of_work (его используют и employment, и часть schedule-вариантов —
+        # "сменный график"/"вахта") employment побеждает как более общая категория.
+        sj_extra_params: dict = sj_schedule_params(filter_schedule)
+        sj_employment = sj_experience_or_employment(EMPLOYMENT_OPTIONS, filter_employment)
+        if sj_employment is not None:
+            sj_extra_params["type_of_work"] = sj_employment
+        sj_extra_params["experience"] = sj_experience_or_employment(EXPERIENCE_OPTIONS, filter_experience)
         for query in s["queries"]:
             log.info("[SuperJob] Поиск: %r", query)
             params = {
@@ -164,6 +220,7 @@ def cmd_fetch(cfg: dict) -> None:
                 "period": s.get("period"),
                 "count": min(s.get("per_page", 50), 100),
                 "max_pages": s.get("max_pages", 4),
+                **sj_extra_params,
             }
             params = {k: v for k, v in params.items() if v not in (None, "")}
             items = sj.search_vacancies(**params)
@@ -185,7 +242,7 @@ def cmd_score(cfg: dict) -> None:
     sj = SuperJobClient(sj_cfg) if sj_cfg else None
     storage = Storage(cfg["paths"]["db"])
     career_base = load_career_base(cfg["paths"]["career_base_md"])
-    ycfg = get_yandex_config(cfg, cfg["yandex"]["scorer_model"])
+    provider = get_provider(cfg, "score", storage)
 
     priority_lines = get_priority_metro_lines(storage)
     # реальные расхождения решение/рекомендация — один раз на весь прогон,
@@ -204,7 +261,7 @@ def cmd_score(cfg: dict) -> None:
             log.warning("Не удалось получить полную карточку %s: %s. Оцениваю по сниппету.", row["id"], e)
             full = json.loads(row["raw_json"])
         text = vacancy_to_text(full, priority_lines)
-        result = score_vacancy(ycfg, career_base, text, corrections_note)
+        result = score_vacancy(provider, career_base, text, corrections_note)
         station, line = get_metro(full)
         metro = {"station": station, "line": line, "priority": bool(line and line in priority_lines)}
         storage.save_score(row["id"], result, metro)
@@ -228,8 +285,7 @@ def cmd_digest(cfg: dict) -> None:
 
     today = date.today().isoformat()
     try:
-        ycfg = get_yandex_config(cfg, cfg["yandex"]["scorer_model"])
-        comment = build_daily_comment(ycfg, storage.scored_today())
+        comment = build_daily_comment(get_provider(cfg, "score", storage), storage.scored_today())
         storage.save_daily_comment(today, comment)
         text = f"## Комментарий дня\n{comment}\n\n{text}"
     except Exception as e:  # noqa: BLE001
@@ -255,7 +311,7 @@ def cmd_tailor(cfg: dict, vacancy_id: str) -> None:
     sj = SuperJobClient(sj_cfg) if sj_cfg else None
     storage = Storage(cfg["paths"]["db"])
     career_base = load_career_base(cfg["paths"]["career_base_md"])
-    ycfg = get_yandex_config(cfg, cfg["yandex"]["tailor_model"])
+    provider = get_provider(cfg, "tailor", storage)
 
     row = storage.get(vacancy_id)
     if row is None:
@@ -264,7 +320,7 @@ def cmd_tailor(cfg: dict, vacancy_id: str) -> None:
     priority_lines = get_priority_metro_lines(storage)
     full = get_full_vacancy(hh, sj, vacancy_id, row["source"])
     text = vacancy_to_text(full, priority_lines)
-    notes, resume_full, letter = tailor_for_vacancy(ycfg, career_base, text)
+    notes, resume_full, letter = tailor_for_vacancy(provider, career_base, text)
 
     out_dir = Path(cfg["paths"]["out_dir"]) / vacancy_id
     out_dir.mkdir(parents=True, exist_ok=True)

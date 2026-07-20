@@ -12,7 +12,7 @@ import json
 import logging
 import re
 
-from .yandex_client import YandexConfig, complete
+from .llm_provider import LLMProvider
 
 log = logging.getLogger("scorer")
 
@@ -98,7 +98,7 @@ def build_corrections_note(rows: list) -> str:
 
 
 def score_vacancy(
-    cfg: YandexConfig, career_base_md: str, vacancy_text: str, corrections_note: str = ""
+    provider: LLMProvider, career_base_md: str, vacancy_text: str, corrections_note: str = ""
 ) -> dict:
     user_content = (
         f"КАРЬЕРНАЯ БАЗА КАНДИДАТА:\n{career_base_md}\n\n"
@@ -106,7 +106,7 @@ def score_vacancy(
         + f"---\n\nТЕКСТ ВАКАНСИИ:\n{vacancy_text}\n\n"
         "Верни JSON по схеме из системного промпта."
     )
-    raw = complete(cfg, SYSTEM_PROMPT, user_content, max_tokens=800, temperature=0.2)
+    raw = provider.complete(SYSTEM_PROMPT, user_content, max_tokens=800, temperature=0.2)
     try:
         return _extract_json(raw)
     except json.JSONDecodeError as e:

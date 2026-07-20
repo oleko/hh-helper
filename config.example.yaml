@@ -53,6 +53,25 @@ yandex:
   scorer_model: "yandexgpt-lite/latest"   # дёшево и достаточно для оценки вакансий
   tailor_model: "yandexgpt/latest"        # для качественного текста резюме/письма
 
+gigachat:
+  # Опционально — второй LLM-провайдер (src/gigachat_client.py). Убери всю секцию,
+  # если GigaChat не нужен вообще. credentials — Authorization key из личного
+  # кабинета Sber Studio (https://developers.sber.ru/studio/), в .env.
+  credentials_env: "GIGACHAT_CREDENTIALS"
+  scope: "GIGACHAT_API_PERS"   # GIGACHAT_API_PERS | GIGACHAT_API_B2B | GIGACHAT_API_CORP
+  scorer_model: "GigaChat-2"
+  tailor_model: "GigaChat-2-Pro"
+
+llm:
+  # Провайдер по умолчанию для скоринга и генерации резюме/писем (src/llm_provider.py).
+  # yandex | gigachat — второй нужен только если заполнишь секцию gigachat ниже.
+  provider: "yandex"
+  score_provider: null    # null = взять provider выше; можно переопределить отдельно для скоринга
+  tailor_provider: null   # то же для tailor'а
+  mode: "sync"            # sync | async — у Yandex оба реализованы; async полезен только
+                          # для cron-пайплайна (fetch→score→digest), не для веб-запросов
+  batch_scoring: false    # пакетный скоринг по N вакансий за запрос — экспериментально, выключено
+
 digest:
   top_n: 15
   min_score_to_show: 55   # вакансии с оценкой ниже — не попадают в дайджест вообще
