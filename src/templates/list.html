@@ -12,13 +12,53 @@
 решение 👍 или 👎. Разобранные уходят в «Подходит» или «Архив» и здесь больше не мозолят глаза.</p>
 {% endif %}
 
-{% if daily_comment %}
-<div class="chart-wrap" style="margin-bottom:1rem;">
-  <p style="margin:0 0 0.3rem; font-size:0.75rem; text-transform:uppercase; color:#666;">
-    Комментарий дня ({{ daily_comment_day }})</p>
-  <p style="margin:0;">{{ daily_comment }}</p>
+{% if pipeline_runs %}
+{% set latest = pipeline_runs[0] %}
+{% set fetch_run = pipeline_runs | selectattr('stage', 'equalto', 'fetch') | first %}
+{% set score_run = pipeline_runs | selectattr('stage', 'equalto', 'score') | first %}
+<div class="chart-wrap" id="pipeline-widget" style="margin-bottom:1rem;"
+     data-active="{{ '1' if latest.status == 'running' else '0' }}">
+  {% if latest.status == 'running' %}
+  <p style="margin:0 0 0.3rem;" id="pipeline-stage-text">
+    ⟳ Выполняется: <strong>{{ {'fetch': 'сбор вакансий', 'score': 'оценка', 'digest': 'дайджест'}.get(latest.stage, latest.stage) }}</strong>
+    {% if latest.total %}({{ latest.done }}/{{ latest.total }}){% endif %}
+  </p>
+  <div class="progress-bar"><div class="progress-fill" id="pipeline-progress-fill"
+       style="width: {{ (latest.done / latest.total * 100) if latest.total else 0 }}%;"></div></div>
+  {% else %}
+  <p style="margin:0; color:#666; font-size:0.85rem;" id="pipeline-stage-text">
+    Последний запуск: {{ (latest.finished_at or latest.started_at or '')[:16] | replace('T', ' ') }}
+    {%- if fetch_run and fetch_run.message %} · {{ fetch_run.message }}{% endif %}
+    {%- if score_run and score_run.message %} · {{ score_run.message }}{% endif %}
+  </p>
+  {% endif %}
 </div>
+<script>
+(function() {
+  const widget = document.getElementById("pipeline-widget");
+  if (!widget || widget.dataset.active !== "1") return;
+  const stageLabels = {fetch: "сбор вакансий", score: "оценка", digest: "дайджест"};
+  function poll() {
+    fetch("/api/pipeline-status").then((r) => r.json()).then((runs) => {
+      if (!runs.length) return;
+      const latest = runs[0];
+      if (latest.status !== "running") {
+        location.reload();
+        return;
+      }
+      document.getElementById("pipeline-stage-text").textContent =
+        `⟳ Выполняется: ${stageLabels[latest.stage] || latest.stage}` +
+        (latest.total ? ` (${latest.done}/${latest.total})` : "");
+      const fill = document.getElementById("pipeline-progress-fill");
+      if (fill) fill.style.width = (latest.total ? (latest.done / latest.total * 100) : 0) + "%";
+      setTimeout(poll, 4000);
+    }).catch(() => setTimeout(poll, 4000));
+  }
+  setTimeout(poll, 4000);
+})();
+</script>
 {% endif %}
+
 <details class="legend">
   <summary>Легенда</summary>
   <ul>

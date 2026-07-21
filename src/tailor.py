@@ -131,3 +131,19 @@ def tailor_for_vacancy(provider: LLMProvider, career_base_md: str, vacancy_text:
     )
     raw = provider.complete(SYSTEM_PROMPT, user_content, max_tokens=4000, temperature=0.4)
     return _split_sections(raw)
+
+
+SEARCH_QUERIES_SYSTEM_PROMPT = """Ты помогаешь подобрать поисковые запросы для агрегатора
+вакансий (hh.ru/SuperJob) под конкретного кандидата.
+
+По карьерной базе кандидата предложи 5-8 коротких поисковых фраз (2-4 слова) — как реальные
+названия должностей в строке поиска. Разные формулировки одной и той же роли, при уместности —
+и на английском, если рынок это предполагает. Без объяснений и нумерации, только сами фразы,
+каждая на отдельной строке."""
+
+
+def generate_search_queries(provider: LLMProvider, career_base_md: str) -> list[str]:
+    """Черновик поисковых фраз для /settings — пользователь проверяет/правит перед
+    сохранением, ничего не применяется автоматически (см. settings.html)."""
+    text = provider.complete(SEARCH_QUERIES_SYSTEM_PROMPT, career_base_md, max_tokens=300, temperature=0.5)
+    return [ln.strip("-•*\"' \t") for ln in text.splitlines() if ln.strip()]

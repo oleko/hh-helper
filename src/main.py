@@ -4,6 +4,8 @@
   python -m src.main fetch        — тянет вакансии с hh.ru по фильтрам из config.yaml
   python -m src.main score        — оценивает новые вакансии через YandexGPT
   python -m src.main digest       — печатает/сохраняет markdown-дайджест топ-вакансий
+  python -m src.main run-all      — fetch → score → digest одним вызовом (то же самое,
+                                     что кнопка «Запустить сейчас» в /settings)
   python -m src.main mark <id> <status>   — interested / skip / applied
   python -m src.main tailor <id>          — резюме (md+docx) + сопроводительное письмо
   python -m src.main dictionaries         — сохраняет areas/professional_roles в out/,
@@ -43,7 +45,7 @@ from .sources import get_full_vacancy, get_vacancy_status
 from .yandex_client import YandexConfig
 from .scorer import build_corrections_note, get_metro, score_vacancy, vacancy_to_text
 from .tailor import tailor_for_vacancy
-from .digest import build_daily_comment, build_digest
+from .digest import build_digest
 from .docx_export import build_resume_docx, extract_candidate_name
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s %(levelname)s %(message)s")
@@ -128,6 +130,16 @@ def get_priority_metro_lines(storage: Storage) -> list[str]:
     return json.loads(storage.get_setting("priority_metro_lines", "[]"))
 
 
+def get_search_queries(storage: Storage, cfg: dict) -> list[str]:
+    """Поисковые фразы для fetch — настраиваются на странице «Настройки»
+    (см. settings_search в webapp.py). Если ещё ничего не сохранено (новый
+    инстанс) — фоллбэк на search.queries из config.yaml."""
+    raw = storage.get_setting("search_queries")
+    if raw:
+        return json.loads(raw)
+    return list(cfg.get("search", {}).get("queries", []))
+
+
 def get_filter_selection(storage: Storage, category: str) -> list[str]:
     """category: "experience" | "employment" | "schedule" — список выбранных
     ключей опций (см. src/filters.py), настраивается на странице «Настройки»."""
@@ -154,7 +166,9 @@ def cmd_fetch(cfg: dict) -> None:
         log.info("Сбор новых вакансий на паузе (см. /settings в веб-интерфейсе) — fetch пропущен.")
         return
     s = cfg["search"]
+    queries = get_search_queries(storage, cfg)
     total_new = 0
+    total_found = 0
 
     # город, зарплатный порог и фильтры опыта/занятости/графика — настраиваются
     # на странице «Настройки» (веб-интерфейс), не в config.yaml, чтобы человек
@@ -166,74 +180,91 @@ def cmd_fetch(cfg: dict) -> None:
     filter_employment = get_filter_selection(storage, "employment")
     filter_schedule = get_filter_selection(storage, "schedule")
 
-    if storage.get_setting("source_hh_enabled", "1") == "1":
-        hh = HHClient(get_hh_config(cfg))
-        for query in s["queries"]:
-            log.info("[hh.ru] Поиск: %r", query)
-            params = {
-                "text": query,
-                "search_field": s.get("search_field") or None,
-                "area": search_area,
-                "employment": hh_values(EMPLOYMENT_OPTIONS, filter_employment) or None,
-                "schedule": hh_values(SCHEDULE_OPTIONS, filter_schedule) or None,
-                "experience": hh_values(EXPERIENCE_OPTIONS, filter_experience) or None,
-                "salary": salary_from or None,
-                "currency": s.get("currency"),
-                "only_with_salary": "true" if s.get("only_with_salary") else None,
-                "period": s.get("period"),
-                "per_page": s.get("per_page", 50),
-                "max_pages": s.get("max_pages", 4),
-            }
-            params = {k: v for k, v in params.items() if v not in (None, "")}
-            items = hh.search_vacancies(**params)
-            new_count = 0
-            for v in items:
-                if storage.upsert_vacancy(v, source="hh"):
-                    new_count += 1
-            log.info("  всего найдено: %s, новых: %s", len(items), new_count)
-            total_new += new_count
-    else:
-        log.info("Источник hh.ru выключен в настройках — пропускаю.")
+    hh_enabled = storage.get_setting("source_hh_enabled", "1") == "1"
+    sj_enabled = storage.get_setting("source_superjob_enabled", "1") == "1" and bool(cfg.get("superjob"))
+    # прогресс-бар на главной странице (см. /api/pipeline-status) — грубо, по
+    # числу запросов×источников, без учёта пагинации внутри одного запроса
+    run_id = storage.start_pipeline_run("fetch", total=len(queries) * (int(hh_enabled) + int(sj_enabled)))
+    done = 0
+    try:
+        if hh_enabled:
+            hh = HHClient(get_hh_config(cfg))
+            for query in queries:
+                log.info("[hh.ru] Поиск: %r", query)
+                params = {
+                    "text": query,
+                    "search_field": s.get("search_field") or None,
+                    "area": search_area,
+                    "employment": hh_values(EMPLOYMENT_OPTIONS, filter_employment) or None,
+                    "schedule": hh_values(SCHEDULE_OPTIONS, filter_schedule) or None,
+                    "experience": hh_values(EXPERIENCE_OPTIONS, filter_experience) or None,
+                    "salary": salary_from or None,
+                    "currency": s.get("currency"),
+                    "only_with_salary": "true" if s.get("only_with_salary") else None,
+                    "period": s.get("period"),
+                    "per_page": s.get("per_page", 50),
+                    "max_pages": s.get("max_pages", 4),
+                }
+                params = {k: v for k, v in params.items() if v not in (None, "")}
+                items = hh.search_vacancies(**params)
+                new_count = 0
+                for v in items:
+                    if storage.upsert_vacancy(v, source="hh"):
+                        new_count += 1
+                log.info("  всего найдено: %s, новых: %s", len(items), new_count)
+                total_new += new_count
+                total_found += len(items)
+                done += 1
+                storage.update_pipeline_run(run_id, done=done)
+        else:
+            log.info("Источник hh.ru выключен в настройках — пропускаю.")
 
-    if storage.get_setting("source_superjob_enabled", "1") == "1" and cfg.get("superjob"):
-        sj = SuperJobClient(get_superjob_config(cfg))
-        # SuperJob не поддерживает мультивыбор в этих категориях (см. src/filters.py) —
-        # берём первый применимый вариант на категорию; при конфликте на параметре
-        # type_of_work (его используют и employment, и часть schedule-вариантов —
-        # "сменный график"/"вахта") employment побеждает как более общая категория.
-        sj_extra_params: dict = sj_schedule_params(filter_schedule)
-        sj_employment = sj_experience_or_employment(EMPLOYMENT_OPTIONS, filter_employment)
-        if sj_employment is not None:
-            sj_extra_params["type_of_work"] = sj_employment
-        sj_extra_params["experience"] = sj_experience_or_employment(EXPERIENCE_OPTIONS, filter_experience)
-        for query in s["queries"]:
-            log.info("[SuperJob] Поиск: %r", query)
-            params = {
-                "keyword": query,
-                "town": superjob_town,
-                "payment_from": salary_from or None,
-                # period у SuperJob — не число дней, а перечисление (0=всё время,
-                # 1=сутки, 3=трое суток, 7=неделя, 30=месяц); совпадение с числом
-                # дней из search.period случайно, но пока значение 7 подходит и там,
-                # и там — если сменишь search.period на что-то другое, сверься
-                # с перечислением SuperJob (см. api.superjob.ru).
-                "period": s.get("period"),
-                "count": min(s.get("per_page", 50), 100),
-                "max_pages": s.get("max_pages", 4),
-                **sj_extra_params,
-            }
-            params = {k: v for k, v in params.items() if v not in (None, "")}
-            items = sj.search_vacancies(**params)
-            new_count = 0
-            for v in items:
-                if storage.upsert_vacancy(v, source="superjob"):
-                    new_count += 1
-            log.info("  всего найдено: %s, новых: %s", len(items), new_count)
-            total_new += new_count
-    else:
-        log.info("Источник SuperJob выключен в настройках (или не задан в config.yaml) — пропускаю.")
+        if sj_enabled:
+            sj = SuperJobClient(get_superjob_config(cfg))
+            # SuperJob не поддерживает мультивыбор в этих категориях (см. src/filters.py) —
+            # берём первый применимый вариант на категорию; при конфликте на параметре
+            # type_of_work (его используют и employment, и часть schedule-вариантов —
+            # "сменный график"/"вахта") employment побеждает как более общая категория.
+            sj_extra_params: dict = sj_schedule_params(filter_schedule)
+            sj_employment = sj_experience_or_employment(EMPLOYMENT_OPTIONS, filter_employment)
+            if sj_employment is not None:
+                sj_extra_params["type_of_work"] = sj_employment
+            sj_extra_params["experience"] = sj_experience_or_employment(EXPERIENCE_OPTIONS, filter_experience)
+            for query in queries:
+                log.info("[SuperJob] Поиск: %r", query)
+                params = {
+                    "keyword": query,
+                    "town": superjob_town,
+                    "payment_from": salary_from or None,
+                    # period у SuperJob — не число дней, а перечисление (0=всё время,
+                    # 1=сутки, 3=трое суток, 7=неделя, 30=месяц); совпадение с числом
+                    # дней из search.period случайно, но пока значение 7 подходит и там,
+                    # и там — если сменишь search.period на что-то другое, сверься
+                    # с перечислением SuperJob (см. api.superjob.ru).
+                    "period": s.get("period"),
+                    "count": min(s.get("per_page", 50), 100),
+                    "max_pages": s.get("max_pages", 4),
+                    **sj_extra_params,
+                }
+                params = {k: v for k, v in params.items() if v not in (None, "")}
+                items = sj.search_vacancies(**params)
+                new_count = 0
+                for v in items:
+                    if storage.upsert_vacancy(v, source="superjob"):
+                        new_count += 1
+                log.info("  всего найдено: %s, новых: %s", len(items), new_count)
+                total_new += new_count
+                total_found += len(items)
+                done += 1
+                storage.update_pipeline_run(run_id, done=done)
+        else:
+            log.info("Источник SuperJob выключен в настройках (или не задан в config.yaml) — пропускаю.")
+    except Exception as e:
+        storage.finish_pipeline_run(run_id, "error", str(e))
+        raise
 
     log.info("Готово. Новых вакансий за запуск: %s", total_new)
+    storage.finish_pipeline_run(run_id, "done", f"новых: {total_new}, найдено: {total_found}")
 
 
 def cmd_score(cfg: dict) -> None:
@@ -253,53 +284,66 @@ def cmd_score(cfg: dict) -> None:
 
     rows = storage.unscored()
     log.info("К оценке: %s вакансий", len(rows))
-    for i, row in enumerate(rows, 1):
-        try:
-            # добираем полное описание — в поиске приходит только сниппет
-            full = get_full_vacancy(hh, sj, row["id"], row["source"])
-        except Exception as e:  # noqa: BLE001
-            log.warning("Не удалось получить полную карточку %s: %s. Оцениваю по сниппету.", row["id"], e)
-            full = json.loads(row["raw_json"])
-        text = vacancy_to_text(full, priority_lines)
-        result = score_vacancy(provider, career_base, text, corrections_note)
-        storage.record_token_usage(provider.name, "score", provider.last_usage)
-        station, line = get_metro(full)
-        metro = {"station": station, "line": line, "priority": bool(line and line in priority_lines)}
-        storage.save_score(row["id"], result, metro)
-        fit_score = result.get("fit_score")
-        if auto_reject_max is not None and fit_score is not None and fit_score <= auto_reject_max:
-            storage.set_decision(row["id"], "not_fit", f"автоматически: fit_score {fit_score} ≤ {auto_reject_max}")
-            storage.set_liked(row["id"], False)
-            storage.mark_status(row["id"], "skip")
-        log.info(
-            "[%s/%s] %s — score=%s recommend=%s",
-            i, len(rows), row["name"], result.get("fit_score"), result.get("recommend"),
-        )
+    run_id = storage.start_pipeline_run("score", total=len(rows))
+    try:
+        for i, row in enumerate(rows, 1):
+            try:
+                # добираем полное описание — в поиске приходит только сниппет
+                full = get_full_vacancy(hh, sj, row["id"], row["source"])
+            except Exception as e:  # noqa: BLE001
+                log.warning("Не удалось получить полную карточку %s: %s. Оцениваю по сниппету.", row["id"], e)
+                full = json.loads(row["raw_json"])
+            text = vacancy_to_text(full, priority_lines)
+            result = score_vacancy(provider, career_base, text, corrections_note)
+            storage.record_token_usage(provider.name, "score", provider.last_usage)
+            station, line = get_metro(full)
+            metro = {"station": station, "line": line, "priority": bool(line and line in priority_lines)}
+            storage.save_score(row["id"], result, metro)
+            fit_score = result.get("fit_score")
+            if auto_reject_max is not None and fit_score is not None and fit_score <= auto_reject_max:
+                storage.set_decision(row["id"], "not_fit", f"автоматически: fit_score {fit_score} ≤ {auto_reject_max}")
+                storage.set_liked(row["id"], False)
+                storage.mark_status(row["id"], "skip")
+            log.info(
+                "[%s/%s] %s — score=%s recommend=%s",
+                i, len(rows), row["name"], result.get("fit_score"), result.get("recommend"),
+            )
+            storage.update_pipeline_run(run_id, done=i)
+    except Exception as e:
+        storage.finish_pipeline_run(run_id, "error", str(e))
+        raise
+    storage.finish_pipeline_run(run_id, "done", f"оценено: {len(rows)}")
 
 
 def cmd_digest(cfg: dict) -> None:
     from datetime import date
 
     storage = Storage(cfg["paths"]["db"])
-    d = cfg["digest"]
-    text = build_digest(storage, d["min_score_to_show"], d["top_n"])
-
-    today = date.today().isoformat()
+    run_id = storage.start_pipeline_run("digest")
     try:
-        provider = get_provider(cfg, "score", storage)
-        comment = build_daily_comment(provider, storage.scored_today())
-        storage.record_token_usage(provider.name, "digest", provider.last_usage)
-        storage.save_daily_comment(today, comment)
-        text = f"## Комментарий дня\n{comment}\n\n{text}"
-    except Exception as e:  # noqa: BLE001
-        log.warning("Не удалось собрать дневной комментарий: %s", e)
+        d = cfg["digest"]
+        text = build_digest(storage, d["min_score_to_show"], d["top_n"])
 
-    out_dir = Path(cfg["paths"]["out_dir"])
-    out_dir.mkdir(parents=True, exist_ok=True)
-    out_path = out_dir / f"digest_{today}.md"
-    out_path.write_text(text, encoding="utf-8")
-    print(text)
-    log.info("Дайджест сохранён: %s", out_path)
+        today = date.today().isoformat()
+        out_dir = Path(cfg["paths"]["out_dir"])
+        out_dir.mkdir(parents=True, exist_ok=True)
+        out_path = out_dir / f"digest_{today}.md"
+        out_path.write_text(text, encoding="utf-8")
+        print(text)
+        log.info("Дайджест сохранён: %s", out_path)
+    except Exception as e:
+        storage.finish_pipeline_run(run_id, "error", str(e))
+        raise
+    storage.finish_pipeline_run(run_id, "done")
+
+
+def cmd_run_all(cfg: dict) -> None:
+    """fetch → score → digest в одном процессе — то же самое, что делает cron
+    тремя строками; вызывается и по расписанию (см. README), и по клику
+    «Запустить сейчас» в /settings (см. settings_run_now в webapp.py)."""
+    cmd_fetch(cfg)
+    cmd_score(cfg)
+    cmd_digest(cfg)
 
 
 def cmd_mark(cfg: dict, vacancy_id: str, status: str) -> None:
@@ -434,6 +478,7 @@ def main() -> None:
     sub.add_parser("fetch")
     sub.add_parser("score")
     sub.add_parser("digest")
+    sub.add_parser("run-all")
     p_mark = sub.add_parser("mark")
     p_mark.add_argument("vacancy_id")
     p_mark.add_argument("status", choices=["interested", "skip", "applied", "new"])
@@ -453,6 +498,8 @@ def main() -> None:
         cmd_score(cfg)
     elif args.command == "digest":
         cmd_digest(cfg)
+    elif args.command == "run-all":
+        cmd_run_all(cfg)
     elif args.command == "mark":
         cmd_mark(cfg, args.vacancy_id, args.status)
     elif args.command == "tailor":

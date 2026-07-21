@@ -25,6 +25,21 @@
 </p>
 {% endif %}
 
+{% if fetch_runs %}
+<div class="chart-wrap" style="margin-top:0.6rem;">
+  <p style="margin:0 0 0.4rem; font-size:0.8rem; color:#666;">
+    Последние прогоны <code>fetch</code> — «найдено» это все совпадения по API
+    (HH отдаёт вакансии за последние 7 дней при каждом запуске, поэтому туда
+    попадают и уже виденные), «новых» — то, что реально впервые попало в базу
+    и показано на графике выше:</p>
+  <ul style="margin:0; padding-left:1.2rem; font-size:0.85rem;">
+    {% for r in fetch_runs %}
+    <li>{{ r.date }} — {{ r.message }}</li>
+    {% endfor %}
+  </ul>
+</div>
+{% endif %}
+
 <h2>Зарплата</h2>
 {% if not salary_stats %}
 <p>Пока нет вакансий с указанной зарплатой в рублях.</p>

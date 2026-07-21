@@ -4,7 +4,6 @@ from __future__ import annotations
 import json
 from datetime import date
 
-from .llm_provider import LLMProvider
 from .storage import Storage
 
 RECOMMEND_LABEL = {
@@ -12,26 +11,6 @@ RECOMMEND_LABEL = {
     "consider": "🟡 подумать",
     "skip": "⚪ пропустить",
 }
-
-DAILY_COMMENT_SYSTEM_PROMPT = """Ты — карьерный консультант. Тебе дан короткий список вакансий,
-найденных и оценённых сегодня для кандидата в активном поиске работы.
-
-Напиши живой, короткий (3-5 предложений) комментарий на русском: что сегодня на рынке,
-есть ли что-то выдающееся или странное среди вакансий, стоит ли обратить особое внимание
-на что-то конкретное. Без канцелярита, без markdown-разметки, на "ты", по существу."""
-
-
-def build_daily_comment(provider: LLMProvider, rows: list) -> str:
-    """Короткий комментарий от модели по вакансиям, оценённым сегодня."""
-    if not rows:
-        return "Сегодня новых оценённых вакансий не было."
-    lines = [
-        f"- [{r['score']}] {r['name']} ({r['employer'] or '—'}), трек {r['track'] or '?'}, "
-        f"{r['recommend']}, ЗП {r['salary_fit'] or 'не указана'}"
-        for r in rows
-    ]
-    user_content = "Вакансии, оценённые сегодня:\n" + "\n".join(lines)
-    return provider.complete(DAILY_COMMENT_SYSTEM_PROMPT, user_content, max_tokens=350, temperature=0.6)
 
 
 def build_digest(storage: Storage, min_score: int, top_n: int) -> str:

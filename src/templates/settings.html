@@ -21,6 +21,16 @@
       {% endif %}
     </span>
   </div>
+  <div class="switch-row">
+    <button type="button" id="run-now-btn" onclick="runNow()" {{ "disabled" if run_in_progress }}>▶ Запустить сейчас</button>
+    <span id="run-now-msg">
+      {% if run_in_progress %}Прогон уже выполняется — см. прогресс на главной странице.{% endif %}
+    </span>
+  </div>
+  <p style="color:#666; font-size:0.85rem; margin:0.4rem 0 0;">
+    Запускает <code>fetch → score → digest</code> прямо сейчас, не дожидаясь cron —
+    тот же самый процесс, в фоне, прогресс виден на главной странице.
+  </p>
 </div>
 
 <h3>Источники вакансий</h3>
@@ -59,6 +69,19 @@
      прямо здесь. Город одним выбором задаёт id и для hh.ru, и для SuperJob сразу
      (у них разные справочники городов).</p>
   <form method="post" action="{{ url_for('settings_search') }}">
+    <label>Поисковые фразы (по одной на строку — каждая уходит отдельным запросом
+           и на hh.ru, и на SuperJob; хотя бы одна обязательна):<br>
+      <textarea name="search_queries" id="search-queries-textarea" rows="6" style="width:100%; max-width:24rem;
+                font-family:monospace; font-size:0.85rem; padding:0.5rem; box-sizing:border-box;"
+                >{{ search_queries_text }}</textarea>
+    </label>
+    <br>
+    <button type="button" onclick="generateSearchQueries(this)">🤖 Предложить через ИИ</button>
+    <span id="search-queries-status"></span>
+    <p style="color:#666; font-size:0.85rem; margin:0.3rem 0 0;">
+      Черновик по карьерной базе (та же модель, что пишет резюме/письма) — только
+      подставляется в поле выше, ничего не сохраняет само. Проверь/поправь и жми «Сохранить».</p>
+    <br><br>
     <label>Город:
       <select name="city">
         {% for c in cities %}
@@ -177,19 +200,19 @@
     </label>
     <br><br>
     <button type="submit">Сохранить</button>
-    <button type="button" onclick="refreshModels('yandex'); refreshModels('gigachat');">🔄 Обновить списки моделей</button>
+    <button type="button" onclick="refreshModelsButton(this)">🔄 Обновить списки моделей</button>
   </form>
 
   <p>Проверка связи — минимальный тестовый запрос к провайдеру, чтобы убедиться,
      что ключ и доступ реально работают:</p>
   <div class="switch-row">
     <span class="status-dot status-unknown" id="ping-dot-yandex"></span>
-    <button type="button" onclick="pingProvider('yandex')">Проверить Yandex</button>
+    <button type="button" onclick="pingProvider('yandex', this)">Проверить Yandex</button>
     <span id="ping-msg-yandex"></span>
   </div>
   <div class="switch-row">
     <span class="status-dot status-unknown" id="ping-dot-gigachat"></span>
-    <button type="button" onclick="pingProvider('gigachat')" {{ "disabled" if not gigachat_configured }}>Проверить GigaChat</button>
+    <button type="button" onclick="pingProvider('gigachat', this)" {{ "disabled" if not gigachat_configured }}>Проверить GigaChat</button>
     <span id="ping-msg-gigachat"></span>
   </div>
   {% if not gigachat_configured %}
@@ -198,11 +221,22 @@
 </div>
 
 <script>
-async function pingProvider(provider) {
+// Общий helper для AJAX-кнопок — пока запрос летит, кнопка неактивна и
+// показывает временный текст, чтобы не выглядела кликабельной вникуда.
+function setLoading(btn, loadingText) {
+  if (!btn) return () => {};
+  const original = btn.textContent;
+  btn.disabled = true;
+  btn.textContent = loadingText || "…";
+  return () => { btn.disabled = false; btn.textContent = original; };
+}
+
+async function pingProvider(provider, btn) {
   const dot = document.getElementById(`ping-dot-${provider}`);
   const msg = document.getElementById(`ping-msg-${provider}`);
   dot.className = "status-dot status-unknown";
   msg.textContent = "Проверяю...";
+  const restore = setLoading(btn, "Проверяю…");
   try {
     const resp = await fetch(`/settings/ping/${provider}`, {method: "POST"});
     const data = await resp.json();
@@ -211,6 +245,58 @@ async function pingProvider(provider) {
   } catch (e) {
     dot.className = "status-dot status-fail";
     msg.textContent = "Ошибка запроса: " + e;
+  } finally {
+    restore();
+  }
+}
+
+async function generateSearchQueries(btn) {
+  const status = document.getElementById("search-queries-status");
+  const textarea = document.getElementById("search-queries-textarea");
+  status.textContent = "Генерирую...";
+  const restore = setLoading(btn, "Генерирую…");
+  try {
+    const resp = await fetch("/settings/search-queries/generate", {method: "POST"});
+    const data = await resp.json();
+    if (!data.ok) {
+      status.textContent = "Ошибка: " + data.msg;
+      return;
+    }
+    textarea.value = data.queries.join("\n");
+    status.textContent = `Готово — ${data.queries.length} фраз, проверь и жми «Сохранить».`;
+  } catch (e) {
+    status.textContent = "Ошибка запроса: " + e;
+  } finally {
+    restore();
+  }
+}
+
+async function runNow() {
+  const btn = document.getElementById("run-now-btn");
+  const msg = document.getElementById("run-now-msg");
+  const originalText = btn.textContent;
+  btn.disabled = true;
+  btn.textContent = "Запускаю…";
+  try {
+    const resp = await fetch("/settings/run-now", {method: "POST"});
+    if (resp.status === 409) {
+      msg.textContent = "Прогон уже выполняется.";
+      btn.textContent = originalText;
+      return;
+    }
+    const data = await resp.json();
+    btn.textContent = originalText;
+    if (data.ok) {
+      msg.textContent = "Запущено — прогресс смотри на главной странице.";
+      // кнопка остаётся неактивной — прогон реально идёт
+    } else {
+      msg.textContent = "Ошибка: " + (data.msg || "неизвестная");
+      btn.disabled = false;
+    }
+  } catch (e) {
+    msg.textContent = "Ошибка запроса: " + e;
+    btn.textContent = originalText;
+    btn.disabled = false;
   }
 }
 
@@ -281,6 +367,15 @@ async function refreshModels(provider) {
   } catch (e) {
     modelsStatusText[provider] = `${PROVIDER_LABEL[provider]}: ошибка запроса — ${e}`;
     renderModelsStatus();
+  }
+}
+
+async function refreshModelsButton(btn) {
+  const restore = setLoading(btn, "Обновляю…");
+  try {
+    await Promise.all([refreshModels("yandex"), refreshModels("gigachat")]);
+  } finally {
+    restore();
   }
 }
 

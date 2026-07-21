@@ -91,6 +91,20 @@ CREATE TABLE IF NOT EXISTS token_usage (
     completion_tokens  INTEGER,
     total_tokens       INTEGER
 );
+
+-- один этап (fetch/score/digest) одного прогона пайплайна — и от cron, и от
+-- ручного "Запустить сейчас" в /settings (см. cmd_run_all в main.py). Питает
+-- прогресс-бар на главной странице (см. /api/pipeline-status в webapp.py).
+CREATE TABLE IF NOT EXISTS pipeline_runs (
+    id           INTEGER PRIMARY KEY AUTOINCREMENT,
+    stage        TEXT,       -- 'fetch' | 'score' | 'digest'
+    started_at   TEXT,
+    finished_at  TEXT,
+    status       TEXT,       -- 'running' | 'done' | 'error'
+    total        INTEGER,
+    done         INTEGER DEFAULT 0,
+    message      TEXT
+);
 """
 
 # Колонки, добавленные после первого релиза схемы — для уже существующих БД
@@ -352,6 +366,49 @@ class Storage:
                 "SELECT provider, SUM(total_tokens) AS total FROM token_usage GROUP BY provider"
             ).fetchall()
 
+    def start_pipeline_run(self, stage: str, total: int | None = None) -> int:
+        """Отмечает начало этапа (fetch/score/digest) — для прогресс-бара на
+        главной странице. Возвращает id строки для последующих update/finish."""
+        with self._conn() as conn:
+            cur = conn.execute(
+                "INSERT INTO pipeline_runs (stage, started_at, status, total, done) VALUES (?, ?, 'running', ?, 0)",
+                (stage, now_iso(), total),
+            )
+            return cur.lastrowid
+
+    def update_pipeline_run(self, run_id: int, done: int, total: int | None = None) -> None:
+        with self._conn() as conn:
+            if total is not None:
+                conn.execute("UPDATE pipeline_runs SET done = ?, total = ? WHERE id = ?", (done, total, run_id))
+            else:
+                conn.execute("UPDATE pipeline_runs SET done = ? WHERE id = ?", (done, run_id))
+
+    def finish_pipeline_run(self, run_id: int, status: str, message: str = "") -> None:
+        with self._conn() as conn:
+            conn.execute(
+                "UPDATE pipeline_runs SET status = ?, finished_at = ?, message = ? WHERE id = ?",
+                (status, now_iso(), message, run_id),
+            )
+
+    def latest_pipeline_runs(self, limit: int = 3) -> list[sqlite3.Row]:
+        """Последние N записей (обычно fetch/score/digest одного прогона) —
+        для прогресс-бара и кнопки "Запустить сейчас" в /settings."""
+        with self._conn() as conn:
+            return conn.execute(
+                "SELECT * FROM pipeline_runs ORDER BY id DESC LIMIT ?", (limit,)
+            ).fetchall()
+
+    def recent_fetch_runs(self, limit: int = 14) -> list[sqlite3.Row]:
+        """Последние завершённые прогоны fetch — "найдено" (все совпадения по
+        API, включая уже виденные) рядом с "новых" (что реально попало в базу
+        и показано на графике "Вакансий по дням") — см. /stats."""
+        with self._conn() as conn:
+            return conn.execute(
+                "SELECT started_at, message FROM pipeline_runs "
+                "WHERE stage = 'fetch' AND status = 'done' ORDER BY id DESC LIMIT ?",
+                (limit,),
+            ).fetchall()
+
     def count_by_day(self) -> list[sqlite3.Row]:
         """Сколько вакансий было стянуто (fetch) в каждый день — для графика."""
         with self._conn() as conn:
@@ -425,27 +482,6 @@ class Storage:
                 """,
                 (limit,),
             ).fetchall()
-
-    def scored_today(self) -> list[sqlite3.Row]:
-        """Вакансии, оценённые сегодня — сырьё для дневного комментария."""
-        with self._conn() as conn:
-            return conn.execute(
-                "SELECT * FROM vacancies WHERE substr(scored_at, 1, 10) = date('now') ORDER BY score DESC"
-            ).fetchall()
-
-    def save_daily_comment(self, day: str, comment: str) -> None:
-        with self._conn() as conn:
-            conn.execute(
-                "INSERT INTO daily_comments (day, comment, created_at) VALUES (?, ?, ?) "
-                "ON CONFLICT(day) DO UPDATE SET comment = excluded.comment, created_at = excluded.created_at",
-                (day, comment, now_iso()),
-            )
-
-    def get_latest_daily_comment(self) -> sqlite3.Row | None:
-        with self._conn() as conn:
-            return conn.execute(
-                "SELECT * FROM daily_comments ORDER BY day DESC LIMIT 1"
-            ).fetchone()
 
     def mark_status(self, vacancy_id: str, status: str) -> None:
         with self._conn() as conn:

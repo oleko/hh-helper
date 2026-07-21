@@ -2,10 +2,13 @@
 Веб-интерфейс: просмотр уже посчитанного дайджеста и генерация резюме-заметок
 + сопроводительного письма по клику для выбранной вакансии.
 
-Fetch/score сюда сознательно не входят — это остаётся на cron (см. README),
-чтобы не блокировать веб-запрос на минуту-другую похода в HH API. Веб-часть
-только читает то, что уже лежит в SQLite, и совершает действия (tailor, смена
-статуса).
+Fetch/score внутри самого обработчика запроса сознательно не выполняются —
+реальный прогон score может занимать 15+ минут, а Flask здесь однопоточный
+(app.run без threaded=True), так что это подвесило бы весь веб-интерфейс для
+всех. Ручной запуск («Запустить сейчас» в /settings, см. settings_run_now)
+поэтому идёт через отдельный subprocess (`python -m src.main run-all`) — тем
+же путём, что и cron, только по клику вместо расписания. Веб-процесс лишь
+стартует его и опрашивает прогресс через /api/pipeline-status.
 
 Сессионный логин (страница /login, куки на подписанной сессии Flask) защищает
 доступ, т.к. приложение слушает напрямую по IP VPS — см. предупреждение в
@@ -18,6 +21,8 @@ import logging
 import os
 import secrets
 import statistics
+import subprocess
+import sys
 from datetime import datetime, timedelta
 from pathlib import Path
 
@@ -36,6 +41,7 @@ from .main import (
     get_gigachat_config,
     get_hh_config,
     get_priority_metro_lines,
+    get_search_queries,
     get_superjob_config,
     get_yandex_config,
     load_career_base,
@@ -47,7 +53,7 @@ from .sources import get_full_vacancy, get_vacancy_status, parse_vacancy_url
 from .storage import Storage
 from .superjob_client import SuperJobApiError, SuperJobClient
 from .superjob_client import prefixed_id as sj_prefixed_id
-from .tailor import tailor_for_vacancy
+from .tailor import generate_search_queries, tailor_for_vacancy
 
 _SOURCE_ERRORS = (HHApiError, SuperJobApiError)
 
@@ -259,6 +265,10 @@ def create_app(cfg: dict) -> Flask:
             for r in storage.token_usage_by_day()
         ]
         token_totals = {r["provider"]: r["total"] or 0 for r in storage.token_usage_totals()}
+        fetch_runs = [
+            {"date": (r["started_at"] or "")[:16].replace("T", " "), "message": r["message"]}
+            for r in storage.recent_fetch_runs(14)
+        ]
 
         return render_template(
             "stats.html",
@@ -268,6 +278,7 @@ def create_app(cfg: dict) -> Flask:
             salary_weekly=salary_weekly,
             token_days=token_days,
             token_totals=token_totals,
+            fetch_runs=fetch_runs,
         )
 
     @app.context_processor
@@ -289,7 +300,9 @@ def create_app(cfg: dict) -> Flask:
             limit=PAGE_SIZE, offset=(page_num - 1) * PAGE_SIZE,
         )
         vacancies = [_row_to_view(r, out_dir) for r in rows]
-        daily_comment_row = storage.get_latest_daily_comment() if page == "unsorted" else None
+        pipeline_runs = (
+            [dict(r) for r in storage.latest_pipeline_runs(3)] if page == "unsorted" else None
+        )
         return render_template(
             "list.html",
             page=page,
@@ -300,8 +313,7 @@ def create_app(cfg: dict) -> Flask:
             page_num=page_num,
             total_pages=total_pages,
             total=total,
-            daily_comment=daily_comment_row["comment"] if daily_comment_row else None,
-            daily_comment_day=daily_comment_row["day"] if daily_comment_row else None,
+            pipeline_runs=pipeline_runs,
         )
 
     @app.get("/")
@@ -328,9 +340,14 @@ def create_app(cfg: dict) -> Flask:
         search_superjob_town = storage.get_setting("superjob_town", "4")
         search_salary_from = int(storage.get_setting("search_salary_from", "0") or 0)
         metro_lines_text = "\n".join(get_priority_metro_lines(storage))
+        search_queries_text = "\n".join(get_search_queries(storage, cfg))
+        latest_runs = storage.latest_pipeline_runs(3)
+        run_in_progress = any(r["status"] == "running" for r in latest_runs)
         return render_template(
             "settings.html",
             page="settings",
+            search_queries_text=search_queries_text,
+            run_in_progress=run_in_progress,
             backup_keep_count=backup_keep_count,
             collection_paused=collection_paused,
             source_hh_enabled=source_hh_enabled,
@@ -479,6 +496,10 @@ def create_app(cfg: dict) -> Flask:
         lines = [ln.strip() for ln in (request.form.get("priority_metro_lines") or "").splitlines() if ln.strip()]
         storage.set_setting("priority_metro_lines", json.dumps(lines, ensure_ascii=False))
 
+        queries = [ln.strip() for ln in (request.form.get("search_queries") or "").splitlines() if ln.strip()]
+        if queries:
+            storage.set_setting("search_queries", json.dumps(queries, ensure_ascii=False))
+
         for category, options in (
             ("experience", EXPERIENCE_OPTIONS),
             ("employment", EMPLOYMENT_OPTIONS),
@@ -488,6 +509,59 @@ def create_app(cfg: dict) -> Flask:
             selected = [k for k in request.form.getlist(f"filter_{category}") if k in valid_keys]
             storage.set_setting(f"filter_{category}", json.dumps(selected, ensure_ascii=False))
         return redirect(url_for("settings_page"))
+
+    @app.post("/settings/search-queries/generate")
+    def settings_search_queries_generate():
+        """Черновик поисковых фраз по карьерной базе через tailor-провайдер (ту
+        же тяжёлую модель, что пишет резюме/письма) — результат только
+        подставляется в textarea на фронте, не сохраняется автоматически."""
+        try:
+            provider = get_provider(cfg, "tailor", storage)
+            queries = generate_search_queries(provider, career_state["text"])
+            storage.record_token_usage(provider.name, "tailor", provider.last_usage)
+            return jsonify({"ok": True, "queries": queries})
+        except SystemExit as e:
+            return jsonify({"ok": False, "msg": str(e)})
+        except Exception as e:
+            return jsonify({"ok": False, "msg": str(e)})
+
+    @app.post("/settings/run-now")
+    def settings_run_now():
+        """Запускает fetch→score→digest в отдельном процессе (то же самое, что
+        cron), не блокируя веб-запрос — см. докстринг файла вверху."""
+        latest = storage.latest_pipeline_runs(1)
+        if latest and latest[0]["status"] == "running":
+            started = latest[0]["started_at"]
+            try:
+                stale = (datetime.utcnow() - datetime.fromisoformat(started.replace("+00:00", ""))) > timedelta(minutes=30)
+            except ValueError:
+                stale = False
+            if not stale:
+                abort(409, "Прогон уже выполняется.")
+        project_root = Path(__file__).resolve().parent.parent
+        subprocess.Popen(
+            [sys.executable, "-m", "src.main", "run-all"],
+            cwd=str(project_root),
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+        return jsonify({"ok": True})
+
+    @app.get("/api/pipeline-status")
+    def api_pipeline_status():
+        runs = storage.latest_pipeline_runs(3)
+        return jsonify([
+            {
+                "stage": r["stage"],
+                "status": r["status"],
+                "done": r["done"],
+                "total": r["total"],
+                "message": r["message"],
+                "started_at": r["started_at"],
+                "finished_at": r["finished_at"],
+            }
+            for r in runs
+        ])
 
     @app.post("/settings/sources")
     def settings_sources():
