@@ -37,6 +37,8 @@ from .filters import (
     sj_experience_or_employment,
     sj_schedule_params,
 )
+from .geo import habr_city_for_area
+from .habr_client import HabrClient
 from .hh_client import HHClient, HHConfig
 from .llm_provider import get_provider
 from .storage import Storage
@@ -146,6 +148,13 @@ def get_filter_selection(storage: Storage, category: str) -> list[str]:
     return json.loads(storage.get_setting(f"filter_{category}", "[]"))
 
 
+def get_stop_words(storage: Storage) -> list[str]:
+    """Минус-слова: если любое встречается в названии/описании вакансии, она
+    сразу уходит в архив без скоринга (см. cmd_score) — экономит токены.
+    Настраивается на странице «Настройки»; пусто = фильтр выключен."""
+    return json.loads(storage.get_setting("stop_words", "[]"))
+
+
 def get_superjob_config(cfg: dict) -> SuperJobConfig | None:
     """None, если секции superjob нет в конфиге вовсе — источник полностью опционален."""
     s = cfg.get("superjob")
@@ -182,9 +191,13 @@ def cmd_fetch(cfg: dict) -> None:
 
     hh_enabled = storage.get_setting("source_hh_enabled", "1") == "1"
     sj_enabled = storage.get_setting("source_superjob_enabled", "1") == "1" and bool(cfg.get("superjob"))
+    # Хабр по умолчанию выключен (IT-центричный источник) — включается тумблером в /settings
+    habr_enabled = storage.get_setting("source_habr_enabled", "0") == "1"
     # прогресс-бар на главной странице (см. /api/pipeline-status) — грубо, по
     # числу запросов×источников, без учёта пагинации внутри одного запроса
-    run_id = storage.start_pipeline_run("fetch", total=len(queries) * (int(hh_enabled) + int(sj_enabled)))
+    run_id = storage.start_pipeline_run(
+        "fetch", total=len(queries) * (int(hh_enabled) + int(sj_enabled) + int(habr_enabled))
+    )
     done = 0
     try:
         if hh_enabled:
@@ -259,6 +272,26 @@ def cmd_fetch(cfg: dict) -> None:
                 storage.update_pipeline_run(run_id, done=done)
         else:
             log.info("Источник SuperJob выключен в настройках (или не задан в config.yaml) — пропускаю.")
+
+        if habr_enabled:
+            habr = HabrClient()
+            # у Хабра свои id городов; фильтры опыта/занятости/графика в v1 не
+            # прокидываем (у Хабра иная модель), только запрос + город
+            habr_city = habr_city_for_area(search_area)
+            for query in queries:
+                log.info("[Хабр] Поиск: %r", query)
+                items = habr.search_vacancies(query, city_id=habr_city or None, max_pages=s.get("max_pages", 4))
+                new_count = 0
+                for v in items:
+                    if storage.upsert_vacancy(v, source="habr"):
+                        new_count += 1
+                log.info("  всего найдено: %s, новых: %s", len(items), new_count)
+                total_new += new_count
+                total_found += len(items)
+                done += 1
+                storage.update_pipeline_run(run_id, done=done)
+        else:
+            log.info("Источник Хабр Карьера выключен в настройках — пропускаю.")
     except Exception as e:
         storage.finish_pipeline_run(run_id, "error", str(e))
         raise
@@ -271,11 +304,13 @@ def cmd_score(cfg: dict) -> None:
     hh = HHClient(get_hh_config(cfg))
     sj_cfg = get_superjob_config(cfg)
     sj = SuperJobClient(sj_cfg) if sj_cfg else None
+    habr = HabrClient()
     storage = Storage(cfg["paths"]["db"])
     career_base = load_career_base(cfg["paths"]["career_base_md"])
     provider = get_provider(cfg, "score", storage)
 
     priority_lines = get_priority_metro_lines(storage)
+    stop_words = [w.lower() for w in get_stop_words(storage)]
     # реальные расхождения решение/рекомендация — один раз на весь прогон,
     # не на каждую вакансию заново (список меняется не так часто)
     corrections_note = build_corrections_note(storage.disagreements())
@@ -289,15 +324,40 @@ def cmd_score(cfg: dict) -> None:
         for i, row in enumerate(rows, 1):
             try:
                 # добираем полное описание — в поиске приходит только сниппет
-                full = get_full_vacancy(hh, sj, row["id"], row["source"])
+                full = get_full_vacancy(hh, sj, row["id"], row["source"], habr=habr)
             except Exception as e:  # noqa: BLE001
                 log.warning("Не удалось получить полную карточку %s: %s. Оцениваю по сниппету.", row["id"], e)
                 full = json.loads(row["raw_json"])
             text = vacancy_to_text(full, priority_lines)
-            result = score_vacancy(provider, career_base, text, corrections_note)
-            storage.record_token_usage(provider.name, "score", provider.last_usage)
             station, line = get_metro(full)
             metro = {"station": station, "line": line, "priority": bool(line and line in priority_lines)}
+
+            # минус-слова: если сработали — сразу в архив, без похода в LLM (экономим
+            # токены). Пишем синтетический score, иначе unscored() вернёт вакансию снова.
+            hit = next((w for w in stop_words if w in text.lower()), None)
+            if hit is not None:
+                storage.save_score(
+                    row["id"],
+                    {
+                        "fit_score": 0,
+                        "track": "B",
+                        "salary_fit": "не указана",
+                        "red_flags": [f"минус-слово: {hit}"],
+                        "rationale": f"Автоотсев по минус-слову «{hit}».",
+                        "recommend": "skip",
+                        "ats_keywords": [],
+                    },
+                    metro,
+                )
+                storage.set_decision(row["id"], "not_fit", f"минус-слово: {hit}")
+                storage.set_liked(row["id"], False)
+                storage.mark_status(row["id"], "skip")
+                log.info("[%s/%s] %s — отсев по минус-слову «%s»", i, len(rows), row["name"], hit)
+                storage.update_pipeline_run(run_id, done=i)
+                continue
+
+            result = score_vacancy(provider, career_base, text, corrections_note)
+            storage.record_token_usage(provider.name, "score", provider.last_usage)
             storage.save_score(row["id"], result, metro)
             fit_score = result.get("fit_score")
             if auto_reject_max is not None and fit_score is not None and fit_score <= auto_reject_max:
@@ -356,6 +416,7 @@ def cmd_tailor(cfg: dict, vacancy_id: str) -> None:
     hh = HHClient(get_hh_config(cfg))
     sj_cfg = get_superjob_config(cfg)
     sj = SuperJobClient(sj_cfg) if sj_cfg else None
+    habr = HabrClient()
     storage = Storage(cfg["paths"]["db"])
     career_base = load_career_base(cfg["paths"]["career_base_md"])
     provider = get_provider(cfg, "tailor", storage)
@@ -365,7 +426,7 @@ def cmd_tailor(cfg: dict, vacancy_id: str) -> None:
         raise SystemExit(f"Вакансия {vacancy_id} не найдена в базе. Сначала fetch/score.")
 
     priority_lines = get_priority_metro_lines(storage)
-    full = get_full_vacancy(hh, sj, vacancy_id, row["source"])
+    full = get_full_vacancy(hh, sj, vacancy_id, row["source"], habr=habr)
     text = vacancy_to_text(full, priority_lines)
     notes, resume_full, letter = tailor_for_vacancy(provider, career_base, text)
     storage.record_token_usage(provider.name, "tailor", provider.last_usage)
@@ -387,11 +448,12 @@ def cmd_tailor(cfg: dict, vacancy_id: str) -> None:
 
 
 def refresh_vacancy_status(
-    hh: HHClient, sj: SuperJobClient | None, storage: Storage, vacancy_id: str, source: str = "hh"
+    hh: HHClient, sj: SuperJobClient | None, storage: Storage, vacancy_id: str, source: str = "hh",
+    habr: HabrClient | None = None,
 ) -> dict:
-    """Дёргает источник (hh.ru/SuperJob) за актуальным статусом вакансии и сохраняет
-    в БД. Общий код для ручной кнопки в веб-интерфейсе и для cmd_check_liked."""
-    status = get_vacancy_status(hh, sj, vacancy_id, source)
+    """Дёргает источник (hh.ru/SuperJob/Хабр) за актуальным статусом вакансии и
+    сохраняет в БД. Общий код для ручной кнопки в веб-интерфейсе и для cmd_check_liked."""
+    status = get_vacancy_status(hh, sj, vacancy_id, source, habr=habr)
     storage.set_archived(vacancy_id, status["archived"])
     return status
 
@@ -400,12 +462,13 @@ def cmd_check_liked(cfg: dict) -> None:
     hh = HHClient(get_hh_config(cfg))
     sj_cfg = get_superjob_config(cfg)
     sj = SuperJobClient(sj_cfg) if sj_cfg else None
+    habr = HabrClient()
     storage = Storage(cfg["paths"]["db"])
     rows = storage.list_scored(decision="fit")
     log.info("Проверяю актуальность %s вакансий из «по душе»", len(rows))
     for row in rows:
         try:
-            status = refresh_vacancy_status(hh, sj, storage, row["id"], row["source"])
+            status = refresh_vacancy_status(hh, sj, storage, row["id"], row["source"], habr=habr)
         except Exception as e:  # noqa: BLE001
             log.warning("Не удалось проверить %s: %s", row["id"], e)
             continue

@@ -34,6 +34,7 @@ log = logging.getLogger("webapp")
 from .docx_export import build_resume_docx, extract_candidate_name
 from .filters import EMPLOYMENT_OPTIONS, EXPERIENCE_OPTIONS, SCHEDULE_OPTIONS
 from .geo import CITIES, flatten_hh_areas, flatten_superjob_towns
+from .habr_client import HabrApiError, HabrClient
 from .hh_client import HHApiError, HHClient
 from .llm_provider import get_provider
 from .main import (
@@ -42,6 +43,7 @@ from .main import (
     get_hh_config,
     get_priority_metro_lines,
     get_search_queries,
+    get_stop_words,
     get_superjob_config,
     get_yandex_config,
     load_career_base,
@@ -55,7 +57,7 @@ from .superjob_client import SuperJobApiError, SuperJobClient
 from .superjob_client import prefixed_id as sj_prefixed_id
 from .tailor import generate_search_queries, tailor_for_vacancy
 
-_SOURCE_ERRORS = (HHApiError, SuperJobApiError)
+_SOURCE_ERRORS = (HHApiError, SuperJobApiError, HabrApiError)
 
 TEMPLATE_DIR = Path(__file__).parent / "templates"
 
@@ -73,7 +75,7 @@ def _format_rur(value: float) -> str:
 
 
 _RECOMMEND_LABELS = {"respond": "Подходит", "consider": "Подумай", "skip": "Пропусти"}
-_SOURCE_LABELS = {"hh": "hh.ru", "superjob": "SuperJob"}
+_SOURCE_LABELS = {"hh": "hh.ru", "superjob": "SuperJob", "habr": "Хабр Карьера"}
 PAGE_SIZE = 40
 
 
@@ -137,6 +139,7 @@ def create_app(cfg: dict) -> Flask:
     hh = HHClient(get_hh_config(cfg))
     sj_cfg = get_superjob_config(cfg)
     sj = SuperJobClient(sj_cfg) if sj_cfg else None
+    habr = HabrClient()
     career_base_path = Path(cfg["paths"]["career_base_md"])
     # словарь, а не голая переменная — чтобы правку через /settings/career-base
     # было видно сразу во всех роутах без перезапуска процесса (нужен mutable
@@ -335,23 +338,27 @@ def create_app(cfg: dict) -> Flask:
         collection_paused = storage.get_setting("collection_paused") == "1"
         source_hh_enabled = storage.get_setting("source_hh_enabled", "1") == "1"
         source_superjob_enabled = storage.get_setting("source_superjob_enabled", "1") == "1"
+        source_habr_enabled = storage.get_setting("source_habr_enabled", "0") == "1"
         auto_reject_max_score = int(storage.get_setting("auto_reject_max_score", "40"))
         search_area = storage.get_setting("search_area", "1")
         search_superjob_town = storage.get_setting("superjob_town", "4")
         search_salary_from = int(storage.get_setting("search_salary_from", "0") or 0)
         metro_lines_text = "\n".join(get_priority_metro_lines(storage))
         search_queries_text = "\n".join(get_search_queries(storage, cfg))
+        stop_words_text = "\n".join(get_stop_words(storage))
         latest_runs = storage.latest_pipeline_runs(3)
         run_in_progress = any(r["status"] == "running" for r in latest_runs)
         return render_template(
             "settings.html",
             page="settings",
             search_queries_text=search_queries_text,
+            stop_words_text=stop_words_text,
             run_in_progress=run_in_progress,
             backup_keep_count=backup_keep_count,
             collection_paused=collection_paused,
             source_hh_enabled=source_hh_enabled,
             source_superjob_enabled=source_superjob_enabled,
+            source_habr_enabled=source_habr_enabled,
             auto_reject_max_score=auto_reject_max_score,
             cities=CITIES,
             search_area=search_area,
@@ -500,6 +507,11 @@ def create_app(cfg: dict) -> Flask:
         if queries:
             storage.set_setting("search_queries", json.dumps(queries, ensure_ascii=False))
 
+        # минус-слова: пустой ввод — валидное «фильтра нет», сохраняем [] (в
+        # отличие от search_queries, где пустой ввод игнорируется)
+        stop_words = [ln.strip() for ln in (request.form.get("stop_words") or "").splitlines() if ln.strip()]
+        storage.set_setting("stop_words", json.dumps(stop_words, ensure_ascii=False))
+
         for category, options in (
             ("experience", EXPERIENCE_OPTIONS),
             ("employment", EMPLOYMENT_OPTIONS),
@@ -567,7 +579,7 @@ def create_app(cfg: dict) -> Flask:
     def settings_sources():
         source = request.form.get("source")
         action = request.form.get("action")
-        if source not in ("hh", "superjob") or action not in ("enable", "disable"):
+        if source not in ("hh", "superjob", "habr") or action not in ("enable", "disable"):
             abort(400)
         storage.set_setting(f"source_{source}_enabled", "1" if action == "enable" else "0")
         return redirect(url_for("settings_page"))
@@ -620,7 +632,7 @@ def create_app(cfg: dict) -> Flask:
             abort(404)
         unavailable_notice = None
         try:
-            full = get_full_vacancy(hh, sj, vacancy_id, row["source"])
+            full = get_full_vacancy(hh, sj, vacancy_id, row["source"], habr=habr)
             description_html = _render_description(full.get("description"))
         except _SOURCE_ERRORS as e:
             # вакансия могла быть удалена с сайта-источника целиком (не просто
@@ -665,7 +677,7 @@ def create_app(cfg: dict) -> Flask:
         if row is None:
             abort(404)
         try:
-            full = get_full_vacancy(hh, sj, vacancy_id, row["source"])
+            full = get_full_vacancy(hh, sj, vacancy_id, row["source"], habr=habr)
             text = vacancy_to_text(full, get_priority_metro_lines(storage))
         except _SOURCE_ERRORS as e:
             log.warning("Не удалось получить %s (%s): %s", vacancy_id, row["source"], e)
@@ -728,7 +740,7 @@ def create_app(cfg: dict) -> Flask:
         row = storage.get(vacancy_id)
         if row is None:
             abort(404)
-        refresh_vacancy_status(hh, sj, storage, vacancy_id, row["source"])
+        refresh_vacancy_status(hh, sj, storage, vacancy_id, row["source"], habr=habr)
         return redirect(url_for("vacancy_detail", vacancy_id=vacancy_id))
 
     @app.get("/tool/score-url")
@@ -750,7 +762,7 @@ def create_app(cfg: dict) -> Flask:
         source, native = parsed
         vacancy_id = native if source == "hh" else sj_prefixed_id(native)
         try:
-            full = get_full_vacancy(hh, sj, vacancy_id, source)
+            full = get_full_vacancy(hh, sj, vacancy_id, source, habr=habr)
         except _SOURCE_ERRORS as e:
             return render_template(
                 "score_url.html", page="tool", url=url,

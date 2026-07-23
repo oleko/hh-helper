@@ -60,6 +60,21 @@
     </form>
     <span>SuperJob — {{ "включён" if source_superjob_enabled else "выключен" }}</span>
   </div>
+  <div class="switch-row">
+    <form method="post" action="{{ url_for('settings_sources') }}">
+      <input type="hidden" name="source" value="habr">
+      <input type="hidden" name="action" value="{{ 'disable' if source_habr_enabled else 'enable' }}">
+      <label class="switch">
+        <input type="checkbox" {{ "checked" if source_habr_enabled }} onchange="this.form.submit()">
+        <span class="slider"></span>
+      </label>
+    </form>
+    <span>Хабр Карьера — {{ "включён" if source_habr_enabled else "выключен" }}</span>
+  </div>
+  <p style="color:#666; font-size:0.85rem; margin:0.4rem 0 0;">
+    Хабр Карьера ориентирован на IT — по умолчанию выключен, чтобы не заливать
+    очередь разбора; включи, если ищешь роли в диджитале/продукте.
+  </p>
 </div>
 
 <h3>Поиск</h3>
@@ -112,6 +127,16 @@
                 >{{ metro_lines_text }}</textarea>
     </label>
     <br><br>
+    <label>Минус-слова (по одному на строку):<br>
+      <textarea name="stop_words" rows="5" style="width:100%; max-width:24rem;
+                font-family:monospace; font-size:0.85rem; padding:0.5rem; box-sizing:border-box;"
+                >{{ stop_words_text }}</textarea>
+    </label>
+    <p style="color:#666; font-size:0.85rem; margin:0.3rem 0 0;">
+      Вакансии, где в названии или описании встречается любое из этих слов, сразу
+      уходят в Архив без оценки — экономит токены на заведомо ненужном. Пусто —
+      фильтр выключен.</p>
+    <br>
     <p style="color:#666; font-size:0.85rem; margin:0 0 0.3rem;">Ничего не отмечено в категории —
        фильтр по ней не применяется (ищем без ограничения). На SuperJob из каждой
        категории учитывается только первый отмеченный пункт — там нет мультивыбора.</p>
