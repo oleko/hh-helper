@@ -7,7 +7,10 @@
 # Yandex — GET https://ai.api.cloud.yandex.net/v1/models с заголовками
 # Authorization: Api-Key <ключ> + x-folder-id: <folder_id>; GigaChat —
 # client.get_models() из библиотеки gigachat), не с потолка и не по докам,
-# которые могут отставать от реального каталога.
+# которые могут отставать от реального каталога. У openai строка "model" —
+# то самое имя модели у эндпоинта (см. openai.base_url в config.yaml) — для
+# OpenAI это "gpt-4o-mini" и т.п., для локальных серверов — имя загруженной
+# модели (например, у Ollama — "llama3.1").
 
 scoring:
   - provider: yandex
@@ -25,6 +28,9 @@ scoring:
   - provider: gigachat
     model: "GigaChat-2"
     label: "GigaChat-2 (экспериментально)"
+  - provider: openai
+    model: "gpt-4o-mini"
+    label: "OpenAI GPT-4o mini (экспериментально)"
 
 tailor:
   - provider: yandex
@@ -39,3 +45,6 @@ tailor:
   - provider: gigachat
     model: "GigaChat-2-Pro"
     label: "GigaChat-2-Pro (экспериментально)"
+  - provider: openai
+    model: "gpt-4o"
+    label: "OpenAI GPT-4o (экспериментально)"

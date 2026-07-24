@@ -1,0 +1,55 @@
+# Два сервиса из одного образа (см. Dockerfile) — веб-интерфейс и планировщик,
+# альтернатива systemd+cron из README (раздел "Полноценный деплой"). Общие
+# волюмы: оба сервиса должны видеть одну и ту же БД/резюме-письма/бэкапы.
+#
+# Перед первым запуском (как и без Docker):
+#   cp config.example.yaml config.yaml   # заполнить своими данными
+#   cp .env.example .env                 # вписать ключи
+#   cp career_base.example.md career_base.md
+#   docker compose up -d --build
+#
+# hh_helper.db создаётся автоматически при первом обращении (Storage сам
+# накатывает схему) — bind-mount файла сработает, даже если его ещё нет,
+# если он существует в проекте нулевого размера (touch hh_helper.db) либо
+# docker создаст его сам как каталог — тогда сразу touch перед первым up.
+
+services:
+  web:
+    build: .
+    image: hh-helper:latest
+    restart: unless-stopped
+    ports:
+      - "8765:8765"
+    env_file: .env
+    environment:
+      TZ: Europe/Moscow
+    volumes:
+      - ./config.yaml:/app/config.yaml:ro
+      - ./models.yaml:/app/models.yaml:ro
+      - ./career_base.md:/app/career_base.md:ro
+      - ./hh_helper.db:/app/hh_helper.db
+      - ./out:/app/out
+      - ./backups:/app/backups
+      - ./logs:/app/logs
+      - ./.hh_token_cache.json:/app/.hh_token_cache.json
+    command: ["python", "-m", "src.main", "serve"]
+
+  cron:
+    build: .
+    image: hh-helper:latest
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      TZ: Europe/Moscow
+    volumes:
+      - ./config.yaml:/app/config.yaml:ro
+      - ./models.yaml:/app/models.yaml:ro
+      - ./career_base.md:/app/career_base.md:ro
+      - ./hh_helper.db:/app/hh_helper.db
+      - ./out:/app/out
+      - ./backups:/app/backups
+      - ./logs:/app/logs
+      - ./.hh_token_cache.json:/app/.hh_token_cache.json
+    # -passthrough-logs: вывод job'ов идёт в stdout контейнера (docker logs),
+    # не только в logs/cron.log из самого crontab
+    command: ["supercronic", "-passthrough-logs", "/app/crontab"]

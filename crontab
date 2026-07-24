@@ -1,0 +1,8 @@
+# Расписание для контейнера cron (supercronic, см. docker-compose.yml) —
+# аналог cron-строк из README (раздел "Полноценный деплой"), только через
+# run-all (fetch → score → digest одним вызовом) вместо трёх отдельных строк.
+# Формат — обычный 5-полевой cron; время подчиняется TZ контейнера (см. compose).
+
+0 9 * * * cd /app && python -m src.main run-all >> logs/cron.log 2>&1
+12 9 * * * cd /app && python -m src.main check-liked >> logs/cron.log 2>&1
+40 9 * * * cd /app && python -m src.main backup >> logs/cron.log 2>&1

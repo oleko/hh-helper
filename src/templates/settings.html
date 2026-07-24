@@ -243,6 +243,16 @@
   {% if not gigachat_configured %}
   <p><small>GigaChat не настроен — нет секции <code>gigachat</code> в <code>config.yaml</code>.</small></p>
   {% endif %}
+  <div class="switch-row">
+    <span class="status-dot status-unknown" id="ping-dot-openai"></span>
+    <button type="button" onclick="pingProvider('openai', this)" {{ "disabled" if not openai_configured }}>Проверить OpenAI</button>
+    <span id="ping-msg-openai"></span>
+  </div>
+  {% if not openai_configured %}
+  <p><small>OpenAI-совместимый провайдер не настроен — нет секции <code>openai</code>
+     в <code>config.yaml</code> (сюда же можно подставить любой другой OpenAI-совместимый
+     эндпоинт: OpenRouter, локальную модель через Ollama/LM Studio и т.п.).</small></p>
+  {% endif %}
 </div>
 
 <script>
@@ -325,14 +335,20 @@ async function runNow() {
   }
 }
 
+// Провайдеры, у которых реально заполнена секция в config.yaml (yandex всегда
+// обязателен) — из этого списка строится и живой пинг/обновление каталога
+// моделей ниже, без хардкода имён провайдеров на каждый новый добавленный.
+const PROVIDERS = {{ configured_providers | tojson }};
+
 // Модель по умолчанию на случай, если ранее сохранённого выбора нет в живом
 // каталоге (новый провайдер, ключ только что настроен и т.п.) — те же модели,
 // что были curated-дефолтом в models.yaml.
 const DEFAULT_MODEL = {
   yandex: {score: "yandexgpt-5-lite/latest", tailor: "yandexgpt-5.1/latest"},
   gigachat: {score: "GigaChat-2", tailor: "GigaChat-2-Pro"},
+  openai: {score: "gpt-4o-mini", tailor: "gpt-4o"},
 };
-const PROVIDER_LABEL = {yandex: "Yandex", gigachat: "GigaChat"};
+const PROVIDER_LABEL = {yandex: "Yandex", gigachat: "GigaChat", openai: "OpenAI"};
 
 function populateSelect(select, provider, models, defaultModel) {
   const prefix = `${provider}:`;
@@ -367,11 +383,11 @@ function populateSelect(select, provider, models, defaultModel) {
   }
 }
 
-// Yandex и GigaChat обновляются параллельно (см. DOMContentLoaded ниже) — каждый
+// Провайдеры обновляются параллельно (см. DOMContentLoaded ниже) — каждый
 // пишет только свою часть строки статуса, чтобы они не затирали друг друга.
-const modelsStatusText = {yandex: "", gigachat: ""};
+const modelsStatusText = Object.fromEntries(PROVIDERS.map((p) => [p, ""]));
 function renderModelsStatus() {
-  const combined = ["yandex", "gigachat"].map((p) => modelsStatusText[p]).filter(Boolean).join(" | ");
+  const combined = PROVIDERS.map((p) => modelsStatusText[p]).filter(Boolean).join(" | ");
   document.getElementById("models-status-score").textContent = combined;
   document.getElementById("models-status-tailor").textContent = combined;
 }
@@ -398,17 +414,14 @@ async function refreshModels(provider) {
 async function refreshModelsButton(btn) {
   const restore = setLoading(btn, "Обновляю…");
   try {
-    await Promise.all([refreshModels("yandex"), refreshModels("gigachat")]);
+    await Promise.all(PROVIDERS.map((p) => refreshModels(p)));
   } finally {
     restore();
   }
 }
 
 document.addEventListener("DOMContentLoaded", () => {
-  refreshModels("yandex");
-  if ({{ "true" if gigachat_configured else "false" }}) {
-    refreshModels("gigachat");
-  }
+  PROVIDERS.forEach((p) => refreshModels(p));
 });
 </script>
 

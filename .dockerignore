@@ -1,0 +1,25 @@
+# Секреты и личные данные — никогда не должны попасть в образ (те же
+# исключения, что в .gitignore, плюс git/venv-специфичное)
+.env
+config.yaml
+career_base.md
+hh_helper.db
+hh_helper.db-journal
+out/
+backups/
+logs/
+.hh_token_cache.json
+
+.git/
+.venv/
+venv/
+__pycache__/
+*.pyc
+
+.vscode/
+.idea/
+.DS_Store
+
+Dockerfile
+docker-compose.yml
+.dockerignore

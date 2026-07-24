@@ -126,6 +126,23 @@ def get_gigachat_config(cfg: dict):
     return GigaChatConfig(credentials=credentials, scope=g.get("scope", "GIGACHAT_API_PERS"))
 
 
+def get_openai_config(cfg: dict):
+    """OpenAI-совместимый провайдер (OpenAI/OpenRouter/локальные модели —
+    Ollama, LM Studio, vLLM) — опциональный, читается только если реально
+    выбран в /settings или в config.yaml. api_key может быть не задан вовсе
+    (пусто/переменная отсутствует) — у локальных серверов ключа обычно нет."""
+    from .openai_client import OpenAIConfig
+
+    o = cfg.get("openai")
+    if not o or not o.get("base_url"):
+        raise SystemExit(
+            "Выбран провайдер openai, но в config.yaml нет секции openai с "
+            "base_url — см. config.example.yaml."
+        )
+    api_key = os.environ.get(o.get("api_key_env", ""), "") or None
+    return OpenAIConfig(base_url=o["base_url"].rstrip("/"), api_key=api_key)
+
+
 def get_priority_metro_lines(storage: Storage) -> list[str]:
     """Линии метро, дающие небольшой плюс к score — настраиваются на странице
     «Настройки», не в config.yaml (см. settings_search в webapp.py)."""

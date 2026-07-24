@@ -62,9 +62,28 @@ gigachat:
   scorer_model: "GigaChat-2"
   tailor_model: "GigaChat-2-Pro"
 
+openai:
+  # Опционально — третий LLM-провайдер, любой OpenAI-совместимый эндпоинт
+  # (src/openai_client.py). Убери всю секцию, если не нужен. Не завязан на
+  # конкретного вендора — можно подключить OpenAI, OpenRouter или локальную
+  # модель (Ollama/LM Studio/vLLM — все говорят по этому же протоколу).
+  # Примеры base_url:
+  #   OpenAI:     https://api.openai.com/v1  — ⚠ проверено вживую: сам OpenAI
+  #               блокирует запросы из РФ по IP ("unsupported_country_region_
+  #               territory"), даже с валидным ключом — с российского VPS
+  #               напрямую не заработает; нужен OpenRouter/прокси/локальная модель.
+  #   OpenRouter: https://openrouter.ai/api/v1
+  #   Ollama:     http://localhost:11434/v1        (ключ обычно не нужен)
+  #   LM Studio:  http://localhost:1234/v1          (ключ обычно не нужен)
+  base_url: "https://api.openai.com/v1"
+  api_key_env: "OPENAI_API_KEY"   # для локальных моделей можно оставить пустым/не задавать
+  scorer_model: "gpt-4o-mini"
+  tailor_model: "gpt-4o"
+
 llm:
   # Провайдер по умолчанию для скоринга и генерации резюме/писем (src/llm_provider.py).
-  # yandex | gigachat — второй нужен только если заполнишь секцию gigachat ниже.
+  # yandex | gigachat | openai — второй/третий нужны только если заполнишь
+  # секцию gigachat/openai выше.
   provider: "yandex"
   score_provider: null    # null = взять provider выше; можно переопределить отдельно для скоринга
   tailor_provider: null   # то же для tailor'а

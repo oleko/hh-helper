@@ -1,5 +1,6 @@
 """
-Единый интерфейс поверх LLM-провайдеров (Yandex, GigaChat, ...). scorer.py,
+Единый интерфейс поверх LLM-провайдеров (Yandex, GigaChat, любой OpenAI-
+совместимый эндпоинт — OpenAI/OpenRouter/локальные модели). scorer.py,
 tailor.py и digest.py зовут provider.complete(...) и не знают, чья это
 модель — так выбор провайдера/модели переключается конфигом (llm.* в
 config.yaml, позже — из /settings), а не if-ами внутри промпт-логики.
@@ -62,5 +63,12 @@ def get_provider(cfg: dict, task: str, storage=None) -> LLMProvider:
 
         model = model_override or (cfg.get("gigachat") or {}).get(model_key, "GigaChat-2-Pro")
         return GigaChatProvider(get_gigachat_config(cfg), model)
+
+    if provider_name == "openai":
+        from .main import get_openai_config
+        from .openai_client import OpenAIProvider
+
+        model = model_override or (cfg.get("openai") or {}).get(model_key, "gpt-4o-mini")
+        return OpenAIProvider(get_openai_config(cfg), model)
 
     raise ValueError(f"Неизвестный LLM-провайдер: {provider_name!r} (задача={task!r})")

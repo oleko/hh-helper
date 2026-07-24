@@ -41,6 +41,7 @@ from .main import (
     get_filter_selection,
     get_gigachat_config,
     get_hh_config,
+    get_openai_config,
     get_priority_metro_lines,
     get_search_queries,
     get_stop_words,
@@ -377,6 +378,11 @@ def create_app(cfg: dict) -> Flask:
             tailor_choice=storage.get_setting("llm_tailor_choice") or _default_llm_choice("tailor"),
             career_base=career_state["text"],
             gigachat_configured=bool(cfg.get("gigachat")),
+            openai_configured=bool(cfg.get("openai")),
+            # yandex всегда обязателен (см. get_yandex_config) — остальные опциональны,
+            # появляются в списке только если их секция реально есть в config.yaml.
+            # Драйвит JS (пинг/обновление каталога моделей) без хардкода имён провайдеров.
+            configured_providers=["yandex"] + [p for p in ("gigachat", "openai") if cfg.get(p)],
         )
 
     def _default_llm_choice(task: str) -> str:
@@ -398,7 +404,7 @@ def create_app(cfg: dict) -> Flask:
         for task in ("score", "tailor"):
             choice = request.form.get(f"llm_{task}_choice") or ""
             provider, _, model = choice.partition(":")
-            if provider not in ("yandex", "gigachat") or not model:
+            if provider not in ("yandex", "gigachat", "openai") or not model:
                 abort(400, f"Неизвестный выбор модели для задачи {task!r}.")
             storage.set_setting(f"llm_{task}_choice", choice)
         return redirect(url_for("settings_page"))
@@ -408,7 +414,7 @@ def create_app(cfg: dict) -> Flask:
         """Минимальный реальный запрос к провайдеру — чтобы проверить, что ключ/
         доступ реально работают, не дожидаясь первого fetch/score по расписанию.
         Вызывается через fetch() из settings.html — без перезагрузки страницы."""
-        if provider not in ("yandex", "gigachat"):
+        if provider not in ("yandex", "gigachat", "openai"):
             abort(404)
         if provider == "yandex":
             from .yandex_client import ping as yandex_ping
@@ -418,7 +424,7 @@ def create_app(cfg: dict) -> Flask:
                 ok, msg = yandex_ping(ycfg)
             except SystemExit as e:
                 ok, msg = False, str(e)
-        else:
+        elif provider == "gigachat":
             from .gigachat_client import ping as gigachat_ping
 
             try:
@@ -427,23 +433,36 @@ def create_app(cfg: dict) -> Flask:
                 ok, msg = gigachat_ping(gcfg, model)
             except SystemExit as e:
                 ok, msg = False, str(e)
+        else:
+            from .openai_client import ping as openai_ping
+
+            try:
+                ocfg = get_openai_config(cfg)
+                model = (cfg.get("openai") or {}).get("scorer_model", "gpt-4o-mini")
+                ok, msg = openai_ping(ocfg, model)
+            except SystemExit as e:
+                ok, msg = False, str(e)
         return jsonify({"ok": ok, "msg": msg[:300]})
 
     @app.post("/settings/models/list/<provider>")
     def settings_models_list(provider):
         """Реальный каталог моделей аккаунта у провайдера — чтобы сверять
-        models.yaml с тем, что Yandex/GigaChat отдают по факту, а не гадать."""
-        if provider not in ("yandex", "gigachat"):
+        models.yaml с тем, что провайдер отдаёт по факту, а не гадать."""
+        if provider not in ("yandex", "gigachat", "openai"):
             abort(404)
         try:
             if provider == "yandex":
                 from .yandex_client import list_models as yandex_list_models
 
                 models = yandex_list_models(get_yandex_config(cfg, cfg["yandex"]["scorer_model"]))
-            else:
+            elif provider == "gigachat":
                 from .gigachat_client import list_models as gigachat_list_models
 
                 models = gigachat_list_models(get_gigachat_config(cfg))
+            else:
+                from .openai_client import list_models as openai_list_models
+
+                models = openai_list_models(get_openai_config(cfg))
             return jsonify({"ok": True, "models": models})
         except SystemExit as e:
             return jsonify({"ok": False, "msg": str(e)})
