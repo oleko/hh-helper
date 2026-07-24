@@ -17,11 +17,20 @@ Foundation Models тоже есть OpenAI-совместимый эндпоин
 """
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass
 
 import requests
 
 from .llm_provider import LLMProvider
+
+log = logging.getLogger("openai_client")
+
+# Показывается в /settings вместо сырого текста ошибки провайдера (может быть
+# длинным JSON — например OpenAI на 403 из региона, где сервис не поддерживается,
+# отдаёт целый объект error) — подробности всегда есть в логе, а как реально
+# подключить провайдера (base_url/ключ) — см. help.html → «Как подключить провайдера».
+_NOT_CONNECTED_MSG = 'Не подключён — проверь base_url/ключ в config.yaml (см. «Справка» → «Как подключить провайдера»).'
 
 
 @dataclass
@@ -81,9 +90,13 @@ def complete(
 def list_models(cfg: OpenAIConfig) -> list[str]:
     """Реальный каталог моделей эндпоинта (GET /models, стандартный для
     OpenAI-совместимых серверов) — вместо угадывания имени модели."""
-    resp = requests.get(f"{cfg.base_url}/models", headers=_headers(cfg), timeout=15)
-    resp.raise_for_status()
-    return sorted(m["id"] for m in resp.json().get("data", []) if m.get("id"))
+    try:
+        resp = requests.get(f"{cfg.base_url}/models", headers=_headers(cfg), timeout=15)
+        resp.raise_for_status()
+        return sorted(m["id"] for m in resp.json().get("data", []) if m.get("id"))
+    except Exception as e:
+        log.warning("Каталог моделей (%s) недоступен: %s", cfg.base_url, e)
+        raise RuntimeError(_NOT_CONNECTED_MSG) from e
 
 
 def ping(cfg: OpenAIConfig, model: str) -> tuple[bool, str]:
@@ -92,7 +105,8 @@ def ping(cfg: OpenAIConfig, model: str) -> tuple[bool, str]:
         text, _usage = complete(cfg, "Ответь одним словом.", "Скажи 'ок'.", model, max_tokens=16, temperature=0)
         return True, text or "(пустой ответ)"
     except Exception as e:
-        return False, str(e)
+        log.warning("OpenAI-совместимый провайдер (%s) не отвечает: %s", cfg.base_url, e)
+        return False, _NOT_CONNECTED_MSG
 
 
 class OpenAIProvider(LLMProvider):
