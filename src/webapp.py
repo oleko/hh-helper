@@ -329,6 +329,26 @@ def create_app(cfg: dict) -> Flask:
     def liked_page():
         return _render_list("liked", "fit")
 
+    @app.post("/liked/check-actuality")
+    def liked_check_actuality():
+        """Ручная проверка актуальности всех вакансий «Подходит» у источника —
+        то же самое, что ночной check-liked, только по клику и на весь список
+        сразу (без пагинации). Синхронно: это просто HTTP-запросы к API без LLM,
+        на реальных объёмах (десятки вакансий) укладывается в секунды-десятки
+        секунд — в отличие от fetch/score, отдельный subprocess не нужен."""
+        rows = storage.list_scored(decision="fit")
+        archived_count = 0
+        error_count = 0
+        for row in rows:
+            try:
+                status = refresh_vacancy_status(hh, sj, storage, row["id"], row["source"], habr=habr)
+                if status["archived"]:
+                    archived_count += 1
+            except Exception as e:  # noqa: BLE001
+                log.warning("check-actuality: не удалось проверить %s: %s", row["id"], e)
+                error_count += 1
+        return jsonify({"ok": True, "total": len(rows), "archived": archived_count, "errors": error_count})
+
     @app.get("/archive")
     def archive_page():
         return _render_list("archive", "not_fit")

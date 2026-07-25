@@ -12,6 +12,44 @@
 решение 👍 или 👎. Разобранные уходят в «Подходит» или «Архив» и здесь больше не мозолят глаза.</p>
 {% endif %}
 
+{% if page == "liked" %}
+<div class="chart-wrap" style="margin-bottom:1rem;">
+  <button type="button" id="check-actuality-btn" onclick="checkActuality()">🔄 Проверить актуальность</button>
+  <span id="check-actuality-msg"></span>
+  <p style="color:#666; font-size:0.85rem; margin:0.4rem 0 0;">
+    Спрашивает у источника (hh.ru/SuperJob/Хабр), не сняты ли эти вакансии с
+    публикации — обновляет значок 🗄 у каждой. То же самое, что автоматически
+    по ночам делает <code>check-liked</code>, только сразу и по клику.</p>
+</div>
+<script>
+async function checkActuality() {
+  const btn = document.getElementById("check-actuality-btn");
+  const msg = document.getElementById("check-actuality-msg");
+  const original = btn.textContent;
+  btn.disabled = true;
+  btn.textContent = "Проверяю…";
+  msg.textContent = "";
+  try {
+    const resp = await fetch("/liked/check-actuality", {method: "POST"});
+    const data = await resp.json();
+    if (data.ok) {
+      msg.textContent = `Проверено: ${data.total}, в архиве/снято: ${data.archived}` +
+        (data.errors ? `, ошибок: ${data.errors}` : "");
+      setTimeout(() => location.reload(), 1200);
+    } else {
+      msg.textContent = "Ошибка: " + (data.msg || "неизвестная");
+      btn.disabled = false;
+      btn.textContent = original;
+    }
+  } catch (e) {
+    msg.textContent = "Ошибка запроса: " + e;
+    btn.disabled = false;
+    btn.textContent = original;
+  }
+}
+</script>
+{% endif %}
+
 {% if pipeline_runs %}
 {% set latest = pipeline_runs[0] %}
 {% set fetch_run = pipeline_runs | selectattr('stage', 'equalto', 'fetch') | first %}
