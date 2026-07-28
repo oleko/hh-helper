@@ -86,5 +86,11 @@
 </div>
 {% endif %}
 {% block content %}{% endblock %}
+{% if page != 'login' and version %}
+<footer style="margin-top:2rem; padding-top:0.8rem; border-top:1px solid #ddd;
+               color:#999; font-size:0.8rem; text-align:center;">
+  hh-helper · сборка {{ version }}{% if update_available %} · <span style="color:#b45309;">доступно обновление</span>{% endif %}
+</footer>
+{% endif %}
 </body>
 </html>

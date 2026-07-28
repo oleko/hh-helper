@@ -298,6 +298,7 @@ def create_app(cfg: dict) -> Flask:
             "update_available": upd["available"],
             "update_local": upd.get("local"),
             "update_remote": upd.get("remote"),
+            "version": upd.get("local"),
         }
 
     def _render_list(page: str, decision: str | None):
