@@ -2,10 +2,14 @@
 Проверка, есть ли в апстрим-репозитории версия новее задеплоенной.
 
 Для open-source-распространения: у каждого инстанса локальный файл VERSION
-(целое число сборки), а в репозитории на GitHub — свой VERSION. Если удалённый
-номер больше локального — в веб-интерфейсе загорается баннер «доступно
-обновление» и кнопка «Настройки» становится жирной с «(!)» (см. base.html/
-settings.html). Номер сборки бампается вручную при релизе (одна строка).
+(версия сборки, формат "ГГГГ-ММ-ДД" — дата релиза, при нескольких релизах в
+день можно дописать ".1", ".2"), а в репозитории на GitHub — свой VERSION.
+Если удалённая версия новее локальной — в веб-интерфейсе загорается баннер
+«доступно обновление» и кнопка «Настройки» становится жирной с «(!)»
+(см. base.html/settings.html), а номер сборки виден в футере.
+
+Сравнение — по кортежу чисел (2026-07-28 → (2026,7,28)), так что работают и
+даты, и старые целочисленные номера сборок, и суффиксы вроде "-28.1".
 
 Результат кэшируется в settings-таблице на несколько часов, чтобы не ходить в
 GitHub на каждый рендер страницы (и не блокировать страницу таймаутом, если
@@ -16,6 +20,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 import time
 from pathlib import Path
 
@@ -26,17 +31,29 @@ log = logging.getLogger("updates")
 _VERSION_FILE = Path(__file__).resolve().parent.parent / "VERSION"
 _TTL_SECONDS = 6 * 3600
 _CACHE_KEY = "update_check_cache"
+# версия — только цифры, точки и дефисы (даты/номера сборок); всё прочее (напр.
+# HTML-страница ошибки от CDN с кодом 200) не считаем валидной версией
+_VERSION_RE = re.compile(r"^[0-9.\-]{1,32}$")
 
 
-def local_version() -> int | None:
+def local_version() -> str | None:
     try:
-        return int(_VERSION_FILE.read_text(encoding="utf-8").strip())
-    except (OSError, ValueError):
+        v = _VERSION_FILE.read_text(encoding="utf-8").strip()
+        return v or None
+    except OSError:
         return None
 
 
+def _parse(v: str | None) -> tuple[int, ...]:
+    """Версию в кортеж чисел для сравнения: "2026-07-28" → (2026, 7, 28),
+    "2026-07-28.1" → (2026, 7, 28, 1), старое целое "2" → (2,)."""
+    if not v:
+        return ()
+    return tuple(int(x) for x in re.findall(r"\d+", v))
+
+
 def check_for_update(storage, cfg: dict) -> dict:
-    """{"available": bool, "local": int|None, "remote": int|None}. Кэшируется
+    """{"available": bool, "local": str|None, "remote": str|None}. Кэшируется
     на _TTL_SECONDS; при ошибке сети возвращает последнее известное (или «нет»)."""
     local = local_version()
     url = (cfg.get("update_check") or {}).get("version_url")
@@ -57,11 +74,13 @@ def check_for_update(storage, cfg: dict) -> dict:
         try:
             resp = requests.get(url, timeout=6)
             resp.raise_for_status()
-            remote = int(resp.text.strip())
-        except (requests.RequestException, ValueError) as e:
+            candidate = resp.text.strip()
+            remote = candidate if _VERSION_RE.match(candidate) else remote
+        except requests.RequestException as e:
             log.info("Проверка обновлений не удалась: %s", e)
         cache = {"ts": now, "remote": remote}
         storage.set_setting(_CACHE_KEY, json.dumps(cache))
 
     remote = cache.get("remote")
-    return {"available": bool(remote and local is not None and remote > local), "local": local, "remote": remote}
+    available = bool(remote) and _parse(remote) > _parse(local)
+    return {"available": available, "local": local, "remote": remote}
