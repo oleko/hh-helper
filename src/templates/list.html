@@ -151,7 +151,7 @@ async function checkActuality() {
   </thead>
   <tbody>
   {% for v in vacancies %}
-    <tr>
+    <tr id="vac-row-{{ v.id }}">
       <td class="score">{{ v.score }}</td>
       <td><a href="{{ url_for('vacancy_detail', vacancy_id=v.id) }}">{{ v.name }}</a>
           {% if v.status == "new" %}<span class="chip" style="background:#0b5fff;">NEW</span>{% endif %}
@@ -163,21 +163,51 @@ async function checkActuality() {
       <td>{{ v.salary_fit or "не указана" }}{% if v.salary_display %}<br><small>{{ v.salary_display }}</small>{% endif %}</td>
       <td><span class="badge badge-{{ v.recommend }}">{{ v.recommend_label }}</span></td>
       <td class="flags">{{ v.red_flags | join(", ") }}</td>
-      <td>
-        <form class="inline" method="post" action="{{ url_for('vacancy_decide', vacancy_id=v.id) }}">
-          <button type="submit" name="decision" value="fit"
-                  title="Подходит"{% if v.decision == "fit" %} disabled{% endif %}>👍</button>
-          <button type="submit" name="decision" value="not_fit"
-                  title="Не подходит"{% if v.decision == "not_fit" %} disabled{% endif %}>👎</button>
-          {% if v.decision %}
-          <button type="submit" name="decision" value="clear" title="Вернуть в разбор">↩</button>
-          {% endif %}
-        </form>
+      <td class="decision-cell">
+        <button type="button" title="Подходит" onclick="decide('{{ v.id }}','fit',this)"
+                {% if v.decision == "fit" %}disabled{% endif %}>👍</button>
+        <button type="button" title="Не подходит" onclick="decide('{{ v.id }}','not_fit',this)"
+                {% if v.decision == "not_fit" %}disabled{% endif %}>👎</button>
+        {% if v.decision %}
+        <button type="button" title="Вернуть в разбор" onclick="decide('{{ v.id }}','clear',this)">↩</button>
+        {% endif %}
       </td>
     </tr>
   {% endfor %}
   </tbody>
 </table>
+<script>
+// Решения на списке — по AJAX, без перезагрузки: убираем строку (на любой из
+// трёх страниц активные кнопки всегда уводят вакансию из текущего списка) и
+// обновляем счётчики в шапке. Если строк не осталось — перезагружаем, чтобы
+// показать пустое состояние/следующую страницу.
+async function decide(id, decision, btn) {
+  const cell = btn.closest(".decision-cell");
+  const row = btn.closest("tr");
+  cell.querySelectorAll("button").forEach((b) => (b.disabled = true));
+  try {
+    const resp = await fetch(`/vacancy/${id}/decide`, {
+      method: "POST",
+      headers: {"Content-Type": "application/x-www-form-urlencoded"},
+      body: `decision=${encodeURIComponent(decision)}&ajax=1`,
+    });
+    const data = await resp.json();
+    if (!data.ok) throw new Error("bad response");
+    if (data.counts) updateNavCounts(data.counts);
+    row.remove();
+    if (!document.querySelector("tbody tr")) location.reload();
+  } catch (e) {
+    cell.querySelectorAll("button").forEach((b) => (b.disabled = false));
+    alert("Не удалось сохранить решение: " + e);
+  }
+}
+function updateNavCounts(c) {
+  const set = (id, v) => { const el = document.getElementById(id); if (el) el.textContent = `(${v})`; };
+  set("nav-count-unsorted", c.unsorted);
+  set("nav-count-fit", c.fit);
+  set("nav-count-not_fit", c.not_fit);
+}
+</script>
 {% if total_pages > 1 %}
 <p class="filters" style="display:flex; align-items:center; gap:0.8rem;">
   {% if page_num > 1 %}

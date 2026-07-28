@@ -70,12 +70,13 @@
 <div class="topnav">
   <h1><a href="{{ url_for('index') }}">hh-helper</a></h1>
   <nav>
-    <a href="{{ url_for('index') }}" class="{{ 'active' if page == 'unsorted' }}">Разбор{% if nav_counts %} ({{ nav_counts.unsorted }}){% endif %}</a>
-    <a href="{{ url_for('liked_page') }}" class="{{ 'active' if page == 'liked' }}">Подходит{% if nav_counts %} ({{ nav_counts.fit }}){% endif %}</a>
-    <a href="{{ url_for('archive_page') }}" class="{{ 'active' if page == 'archive' }}">Архив{% if nav_counts %} ({{ nav_counts.not_fit }}){% endif %}</a>
+    <a href="{{ url_for('index') }}" class="{{ 'active' if page == 'unsorted' }}">Разбор{% if nav_counts %} <span id="nav-count-unsorted">({{ nav_counts.unsorted }})</span>{% endif %}</a>
+    <a href="{{ url_for('liked_page') }}" class="{{ 'active' if page == 'liked' }}">Подходит{% if nav_counts %} <span id="nav-count-fit">({{ nav_counts.fit }})</span>{% endif %}</a>
+    <a href="{{ url_for('archive_page') }}" class="{{ 'active' if page == 'archive' }}">Архив{% if nav_counts %} <span id="nav-count-not_fit">({{ nav_counts.not_fit }})</span>{% endif %}</a>
     <a href="{{ url_for('score_url_form') }}" class="{{ 'active' if page == 'tool' }}">Вакансия по ссылке</a>
     <a href="{{ url_for('stats_page') }}">Статистика</a>
-    <a href="{{ url_for('settings_page') }}" class="{{ 'active' if page == 'settings' }}">Настройки</a>
+    <a href="{{ url_for('settings_page') }}" class="{{ 'active' if page == 'settings' }}"
+       {% if update_available %}style="font-weight:800;" title="Доступна новая версия"{% endif %}>Настройки{% if update_available %} (!){% endif %}</a>
     <a href="{{ url_for('help_page') }}">Справка</a>
     <form method="post" action="{{ url_for('logout') }}" style="display:inline; margin-left:1rem;">
       <button type="submit" style="background:none; border:none; color:#0b5fff; text-decoration:underline;

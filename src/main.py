@@ -202,6 +202,10 @@ def cmd_fetch(cfg: dict) -> None:
     search_area = storage.get_setting("search_area", "1")            # 1 = Москва
     superjob_town = storage.get_setting("superjob_town", "4") or None  # 4 = Москва
     salary_from = int(storage.get_setting("search_salary_from", "0") or 0)
+    # галочка «учитывать вакансии без указания зарплаты» (по умолчанию — да).
+    # У HH это выражается через only_with_salary: не отправляем его → HH оставляет
+    # вакансии и без зарплаты, отправляем "true" → только с зарплатой (см. ниже).
+    include_no_salary = storage.get_setting("include_no_salary", "1") == "1"
     filter_experience = get_filter_selection(storage, "experience")
     filter_employment = get_filter_selection(storage, "employment")
     filter_schedule = get_filter_selection(storage, "schedule")
@@ -230,7 +234,7 @@ def cmd_fetch(cfg: dict) -> None:
                     "experience": hh_values(EXPERIENCE_OPTIONS, filter_experience) or None,
                     "salary": salary_from or None,
                     "currency": s.get("currency"),
-                    "only_with_salary": "true" if s.get("only_with_salary") else None,
+                    "only_with_salary": None if include_no_salary else "true",
                     "period": s.get("period"),
                     "per_page": s.get("per_page", 50),
                     "max_pages": s.get("max_pages", 4),
@@ -297,7 +301,10 @@ def cmd_fetch(cfg: dict) -> None:
             habr_city = habr_city_for_area(search_area)
             for query in queries:
                 log.info("[Хабр] Поиск: %r", query)
-                items = habr.search_vacancies(query, city_id=habr_city or None, max_pages=s.get("max_pages", 4))
+                # Хабр держим на низком лимите страниц независимо от HH: его каталог
+                # для этой ниши уже вычерпан, лишние страницы — только дубли и время.
+                habr_max_pages = min(s.get("max_pages", 4), 4)
+                items = habr.search_vacancies(query, city_id=habr_city or None, max_pages=habr_max_pages)
                 new_count = 0
                 for v in items:
                     if storage.upsert_vacancy(v, source="habr"):

@@ -3,6 +3,14 @@
 {% block content %}
 <h2>Настройки</h2>
 
+{% if update_available %}
+<div class="chart-wrap" style="border-color:#eab308; background:#fefce8; margin-bottom:1rem;">
+  🔔 <strong>Доступна новая версия</strong> (сборка {{ update_remote }}, у тебя {{ update_local }}).
+  Обнови из репозитория: <code>git pull</code> (или залей обновлённые файлы) и перезапусти сервис —
+  <code>systemctl restart hh-helper-web</code>.
+</div>
+{% endif %}
+
 <h3>Сбор вакансий</h3>
 <div class="chart-wrap">
   <div class="switch-row">
@@ -119,7 +127,15 @@
       <input type="number" name="search_salary_from" min="0" value="{{ search_salary_from }}"
              style="width:8rem; padding:0.35rem;">
     </label>
-    <br><br>
+    <br>
+    <label style="font-weight:normal;">
+      <input type="checkbox" name="include_no_salary" {{ "checked" if include_no_salary }}>
+      Учитывать вакансии без указания зарплаты
+    </label>
+    <p style="color:#666; font-size:0.85rem; margin:0.2rem 0 0;">
+      У сеньорных ролей зарплату часто не публикуют. Если галочка снята — такие
+      вакансии в выдачу не попадут (на hh.ru; SuperJob фильтрует зарплату жёстко в любом случае).</p>
+    <br>
     <label>Приоритетные линии метро (по одной на строку — небольшой плюс к score,
            если совпало; пусто — не влияет на score):<br>
       <textarea name="priority_metro_lines" rows="6" style="width:100%; max-width:24rem;

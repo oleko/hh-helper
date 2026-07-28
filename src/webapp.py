@@ -289,8 +289,16 @@ def create_app(cfg: dict) -> Flask:
     def inject_nav_counts():
         # до входа (страница /login) даже не ходим в базу — незачем
         if not session.get("logged_in"):
-            return {"nav_counts": None}
-        return {"nav_counts": storage.count_by_decision()}
+            return {"nav_counts": None, "update_available": False}
+        from .updates import check_for_update
+
+        upd = check_for_update(storage, cfg)  # кэшируется в settings, см. updates.py
+        return {
+            "nav_counts": storage.count_by_decision(),
+            "update_available": upd["available"],
+            "update_local": upd.get("local"),
+            "update_remote": upd.get("remote"),
+        }
 
     def _render_list(page: str, decision: str | None):
         status = request.args.get("status") or None
@@ -364,6 +372,7 @@ def create_app(cfg: dict) -> Flask:
         search_area = storage.get_setting("search_area", "1")
         search_superjob_town = storage.get_setting("superjob_town", "4")
         search_salary_from = int(storage.get_setting("search_salary_from", "0") or 0)
+        include_no_salary = storage.get_setting("include_no_salary", "1") == "1"
         metro_lines_text = "\n".join(get_priority_metro_lines(storage))
         search_queries_text = "\n".join(get_search_queries(storage, cfg))
         stop_words_text = "\n".join(get_stop_words(storage))
@@ -385,6 +394,7 @@ def create_app(cfg: dict) -> Flask:
             search_area=search_area,
             search_superjob_town=search_superjob_town,
             search_salary_from=search_salary_from,
+            include_no_salary=include_no_salary,
             metro_lines_text=metro_lines_text,
             experience_options=EXPERIENCE_OPTIONS,
             employment_options=EMPLOYMENT_OPTIONS,
@@ -538,6 +548,9 @@ def create_app(cfg: dict) -> Flask:
         if salary < 0:
             abort(400, "Зарплатный порог не может быть отрицательным.")
         storage.set_setting("search_salary_from", str(salary))
+
+        # чекбокс: если галочка снята, браузер поле вообще не пришлёт → "0"
+        storage.set_setting("include_no_salary", "1" if request.form.get("include_no_salary") else "0")
 
         lines = [ln.strip() for ln in (request.form.get("priority_metro_lines") or "").splitlines() if ln.strip()]
         storage.set_setting("priority_metro_lines", json.dumps(lines, ensure_ascii=False))
@@ -771,7 +784,18 @@ def create_app(cfg: dict) -> Flask:
         elif decision == "not_fit":
             storage.set_liked(vacancy_id, False)
             storage.mark_status(vacancy_id, "skip")
-        # со списка — назад в список (с теми же фильтрами), с карточки — на карточку
+        # AJAX со списка (кнопки лайк/дизлайк в /) — отдаём JSON, страница сама
+        # убирает строку и обновляет счётчики в шапке без перезагрузки.
+        if request.form.get("ajax"):
+            return jsonify({
+                "ok": True,
+                "decision": None if decision == "clear" else decision,
+                "counts": storage.count_by_decision(),
+            })
+        # с карточки: «не подходит» → сразу в очередь «Разбор» (к следующей вакансии);
+        # «подходит»/«вернуть» → назад туда, откуда пришли (обычно та же карточка).
+        if decision == "not_fit":
+            return redirect(url_for("index"))
         return redirect(request.referrer or url_for("vacancy_detail", vacancy_id=vacancy_id))
 
     @app.post("/vacancy/<vacancy_id>/check")
