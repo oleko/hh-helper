@@ -171,7 +171,43 @@ cron сам подхватит новый код на следующий про�
 Для личного инструмента с длинным случайным паролем риск невысокий, но если
 хочешь закрыть его: ограничь входящий порт файрволом (`ufw allow from <твой IP>
 to any port 8765`) до своего IP, либо поставь Caddy/nginx с автоматическим TLS
-перед портом.
+перед портом — см. ниже.
+
+### 2.1. Свой домен + TLS через nginx и certbot
+
+Если есть домен (или поддомен 3-го уровня, например `jobs.example.com`) —
+закрывает предупреждение выше по-настоящему, а не файрволом на свой IP.
+
+1. **DNS**: A-запись `<поддомен> → <IP сервера>` у своего регистратора.
+   Проверить, что резолвится: `nslookup <поддомен>`.
+2. **nginx как обратный прокси** (`/etc/nginx/sites-available/hh-helper`):
+   ```nginx
+   server {
+       server_name jobs.example.com;
+       location / {
+           proxy_pass http://127.0.0.1:8765;
+           proxy_set_header Host $host;
+           proxy_set_header X-Forwarded-Proto $scheme;
+           proxy_set_header X-Forwarded-Host $host;
+       }
+       listen 80;
+       listen [::]:80;
+   }
+   ```
+   ```bash
+   ln -s /etc/nginx/sites-available/hh-helper /etc/nginx/sites-enabled/
+   nginx -t && systemctl reload nginx
+   ```
+3. **Сертификат**: `certbot --nginx -d jobs.example.com` — сам допишет
+   TLS-блок в конфиг выше и редирект с HTTP на HTTPS, обновление по крону
+   настраивает тоже сам.
+4. **`config.yaml`**: `webapp.host: "127.0.0.1"` (Flask больше не торчит
+   наружу напрямую — только через nginx) и `webapp.behind_tls: true` (кука
+   сессии становится `Secure`, ходит только по HTTPS). `systemctl restart
+   hh-helper-web`.
+
+После этого прямой `http://<IP>:8765` перестаёт отвечать снаружи — вход
+только через `https://jobs.example.com`.
 
 ## 3. Деплой через Docker (альтернатива systemd+cron)
 

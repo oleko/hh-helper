@@ -185,6 +185,11 @@ def create_app(cfg: dict) -> Flask:
         )
     app.secret_key = secret_key
     app.permanent_session_lifetime = timedelta(days=30)
+    # За TLS-фронтом (nginx+certbot, см. README "Полноценный деплой") кука сессии
+    # должна ходить только по HTTPS — без этого браузер её пришлёт и по случайному
+    # HTTP. Включается явным webapp.behind_tls, а не автоопределением: неверная
+    # догадка здесь тихо ломает логин, лучше явный флаг.
+    app.config["SESSION_COOKIE_SECURE"] = bool(w.get("behind_tls", False))
 
     @app.before_request
     def require_auth():
@@ -305,17 +310,26 @@ def create_app(cfg: dict) -> Flask:
         status = request.args.get("status") or None
         min_score = request.args.get("min_score", type=int)
         sort = request.args.get("sort") or "score"
-        total = storage.count_scored(status=status, min_score=min_score, decision=decision)
+        # скрытие снятых с публикации вакансий — только на «Архиве», по умолчанию
+        # включено; ?show_archived=1 временно показывает всё (ничего не удалено,
+        # просто фильтр отображения, см. storage._scored_where)
+        show_archived = request.args.get("show_archived") == "1"
+        hide_archived = page == "archive" and not show_archived
+        total = storage.count_scored(status=status, min_score=min_score, decision=decision, hide_archived=hide_archived)
         total_pages = max((total + PAGE_SIZE - 1) // PAGE_SIZE, 1)
         page_num = min(max(request.args.get("page", 1, type=int), 1), total_pages)
         rows = storage.list_scored(
             status=status, min_score=min_score, decision=decision, sort=sort,
-            limit=PAGE_SIZE, offset=(page_num - 1) * PAGE_SIZE,
+            limit=PAGE_SIZE, offset=(page_num - 1) * PAGE_SIZE, hide_archived=hide_archived,
         )
         vacancies = [_row_to_view(r, out_dir) for r in rows]
         pipeline_runs = (
             [dict(r) for r in storage.latest_pipeline_runs(3)] if page == "unsorted" else None
         )
+        hidden_archived_count = None
+        if page == "archive" and not show_archived:
+            total_all = storage.count_scored(status=status, min_score=min_score, decision=decision)
+            hidden_archived_count = total_all - total
         return render_template(
             "list.html",
             page=page,
@@ -327,6 +341,8 @@ def create_app(cfg: dict) -> Flask:
             total_pages=total_pages,
             total=total,
             pipeline_runs=pipeline_runs,
+            show_archived=show_archived,
+            hidden_archived_count=hidden_archived_count,
         )
 
     @app.get("/")
@@ -361,6 +377,74 @@ def create_app(cfg: dict) -> Flask:
     @app.get("/archive")
     def archive_page():
         return _render_list("archive", "not_fit")
+
+    def _pipeline_busy() -> bool:
+        """True, если уже идёт фоновый прогон (fetch/score/check-archive/
+        reassess/...) и его не стоит запускать поверх — общий guard для всех
+        subprocess-запусков (run-now, archive/check-actuality, archive/reassess),
+        не только по стадиям, а по последнему прогону в принципе, иначе можно
+        случайно запустить переоценку поверх ещё идущего fetch/score."""
+        latest = storage.latest_pipeline_runs(1)
+        if not latest or latest[0]["status"] != "running":
+            return False
+        started = latest[0]["started_at"]
+        try:
+            stale = (datetime.utcnow() - datetime.fromisoformat(started.replace("+00:00", ""))) > timedelta(minutes=30)
+        except ValueError:
+            stale = False
+        return not stale
+
+    def _run_in_background(command: str) -> None:
+        project_root = Path(__file__).resolve().parent.parent
+        subprocess.Popen(
+            [sys.executable, "-m", "src.main", command],
+            cwd=str(project_root),
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+
+    @app.post("/archive/check-actuality")
+    def archive_check_actuality():
+        """Проверка актуальности всего «Архива» у источника — в отличие от
+        /liked/check-actuality (синхронный, там ~десятки вакансий), тут их
+        тысячи, поэтому фоновый subprocess + pipeline_runs, как run-now, а не
+        прямой HTTP-ответ — см. докстринг файла вверху."""
+        if _pipeline_busy():
+            abort(409, "Прогон уже выполняется.")
+        _run_in_background("check-archive")
+        return jsonify({"ok": True})
+
+    @app.get("/archive/reassess/estimate")
+    def archive_reassess_estimate():
+        """Лёгкая синхронная оценка объёма/стоимости переоценки живого архива —
+        под кнопку с confirm() на фронте, до запуска дорогого прогона. Реальные
+        цифры (COUNT + средний расход токенов по последним score-вызовам), не
+        константы — см. avg_task_tokens в storage.py."""
+        count = storage.count_scored(decision="not_fit", hide_archived=True)
+        avg_tokens = storage.avg_task_tokens("score")
+        est_tokens = int(count * avg_tokens) if avg_tokens else None
+        # ~8000 токенов/вакансию наблюдалось на практике идёт минуты-полторы на
+        # 100 вакансий при одиночном (не batch) скоринге — грубая, но честная
+        # прикидка времени, раз точного счётчика "секунд на вакансию" не ведём.
+        est_minutes = round(count * 4 / 60) if count else 0
+        return jsonify({
+            "ok": True,
+            "count": count,
+            "est_tokens": est_tokens,
+            "est_minutes": est_minutes,
+        })
+
+    @app.post("/archive/reassess")
+    def archive_reassess():
+        """Переоценка живого архива — дорогая LLM-операция (см.
+        cmd_reassess_archive), запускается тем же фоновым subprocess-паттерном,
+        что и check-actuality/run-now, под общим guard'ом на конкурентный
+        прогон (не только по своей стадии — нельзя запускать поверх ещё
+        идущего fetch/score)."""
+        if _pipeline_busy():
+            abort(409, "Прогон уже выполняется.")
+        _run_in_background("reassess-archive")
+        return jsonify({"ok": True})
 
     @app.get("/settings")
     def settings_page():
@@ -594,22 +678,9 @@ def create_app(cfg: dict) -> Flask:
     def settings_run_now():
         """Запускает fetch→score→digest в отдельном процессе (то же самое, что
         cron), не блокируя веб-запрос — см. докстринг файла вверху."""
-        latest = storage.latest_pipeline_runs(1)
-        if latest and latest[0]["status"] == "running":
-            started = latest[0]["started_at"]
-            try:
-                stale = (datetime.utcnow() - datetime.fromisoformat(started.replace("+00:00", ""))) > timedelta(minutes=30)
-            except ValueError:
-                stale = False
-            if not stale:
-                abort(409, "Прогон уже выполняется.")
-        project_root = Path(__file__).resolve().parent.parent
-        subprocess.Popen(
-            [sys.executable, "-m", "src.main", "run-all"],
-            cwd=str(project_root),
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-        )
+        if _pipeline_busy():
+            abort(409, "Прогон уже выполняется.")
+        _run_in_background("run-all")
         return jsonify({"ok": True})
 
     @app.get("/api/pipeline-status")

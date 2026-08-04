@@ -50,6 +50,101 @@ async function checkActuality() {
 </script>
 {% endif %}
 
+{% if page == "archive" %}
+<div class="chart-wrap" style="margin-bottom:1rem;">
+  <button type="button" id="archive-check-actuality-btn" onclick="archiveCheckActuality()">🔄 Проверить актуальность архива</button>
+  <button type="button" id="archive-reassess-btn" onclick="archiveReassess()">♻️ Переоценить архив</button>
+  {% if hidden_archived_count is not none %}
+  <a href="{{ url_for('archive_page', min_score=min_score, sort=sort, show_archived=1) }}">Показать скрытые ({{ hidden_archived_count }})</a>
+  {% elif show_archived %}
+  <a href="{{ url_for('archive_page', min_score=min_score, sort=sort, show_archived=0) }}">Скрыть удалённые</a>
+  {% endif %}
+  <div><span id="archive-check-actuality-msg"></span><span id="archive-reassess-msg"></span></div>
+  <p style="color:#666; font-size:0.85rem; margin:0.4rem 0 0;">
+    «Проверить актуальность» — быстро спрашивает у источника, не сняты ли вакансии
+    с публикации (снятые по умолчанию скрыты из списка, ничего не удаляется).
+    «Переоценить архив» — дорого: заново прогоняет живой архив через модель и
+    возвращает в «Разбор» те, что теперь проходят порог. Обе идут в фоне —
+    прогресс смотри на главной.</p>
+</div>
+<script>
+async function archiveCheckActuality() {
+  const btn = document.getElementById("archive-check-actuality-btn");
+  const msg = document.getElementById("archive-check-actuality-msg");
+  btn.disabled = true;
+  msg.textContent = "";
+  try {
+    const resp = await fetch("/archive/check-actuality", {method: "POST"});
+    if (resp.status === 409) {
+      msg.textContent = "Уже выполняется другой прогон — попробуй позже.";
+      btn.disabled = false;
+      return;
+    }
+    const data = await resp.json();
+    if (data.ok) {
+      msg.textContent = "Запущено, прогресс — на главной.";
+    } else {
+      msg.textContent = "Ошибка: " + (data.msg || "неизвестная");
+      btn.disabled = false;
+    }
+  } catch (e) {
+    msg.textContent = "Ошибка запроса: " + e;
+    btn.disabled = false;
+  }
+}
+
+async function archiveReassess() {
+  const btn = document.getElementById("archive-reassess-btn");
+  const msg = document.getElementById("archive-reassess-msg");
+  btn.disabled = true;
+  msg.textContent = "Считаю объём…";
+  try {
+    const estResp = await fetch("/archive/reassess/estimate");
+    const est = await estResp.json();
+    if (!est.ok) {
+      msg.textContent = "Не удалось получить оценку.";
+      btn.disabled = false;
+      return;
+    }
+    if (!est.count) {
+      msg.textContent = "Живых вакансий в архиве для переоценки нет.";
+      btn.disabled = false;
+      return;
+    }
+    const tokensText = est.est_tokens
+      ? `~${Math.round(est.est_tokens / 1000)}к токенов`
+      : "оценка токенов недоступна (ещё не было ни одного скоринга)";
+    const ok = confirm(
+      `Будет переоценено ~${est.count} вакансий из живого архива, ${tokensText}, ` +
+      `ориентировочно ~${est.est_minutes} мин. Дорогая операция, идёт в фоне. Продолжить?`
+    );
+    if (!ok) {
+      msg.textContent = "";
+      btn.disabled = false;
+      return;
+    }
+    msg.textContent = "Запускаю…";
+    const resp = await fetch("/archive/reassess", {method: "POST"});
+    if (resp.status === 409) {
+      msg.textContent = "Уже выполняется другой прогон — попробуй позже.";
+      btn.disabled = false;
+      return;
+    }
+    const data = await resp.json();
+    if (data.ok) {
+      msg.textContent = "Запущено, прогресс — на главной.";
+    } else {
+      msg.textContent = "Ошибка: " + (data.msg || "неизвестная");
+      btn.disabled = false;
+    }
+  } catch (e) {
+    msg.textContent = "Ошибка запроса: " + e;
+    btn.disabled = false;
+  }
+}
+</script>
+{% endif %}
+
 {% if pipeline_runs %}
 {% set latest = pipeline_runs[0] %}
 {% set fetch_run = pipeline_runs | selectattr('stage', 'equalto', 'fetch') | first %}
@@ -58,7 +153,7 @@ async function checkActuality() {
      data-active="{{ '1' if latest.status == 'running' else '0' }}">
   {% if latest.status == 'running' %}
   <p style="margin:0 0 0.3rem;" id="pipeline-stage-text">
-    ⟳ Выполняется: <strong>{{ {'fetch': 'сбор вакансий', 'score': 'оценка', 'digest': 'дайджест'}.get(latest.stage, latest.stage) }}</strong>
+    ⟳ Выполняется: <strong>{{ {'fetch': 'сбор вакансий', 'score': 'оценка', 'digest': 'дайджест', 'check_liked': 'проверка «Подходит»', 'check_archive': 'проверка архива', 'reassess': 'переоценка архива'}.get(latest.stage, latest.stage) }}</strong>
     {% if latest.total %}({{ latest.done }}/{{ latest.total }}){% endif %}
   </p>
   <div class="progress-bar"><div class="progress-fill" id="pipeline-progress-fill"
@@ -75,7 +170,10 @@ async function checkActuality() {
 (function() {
   const widget = document.getElementById("pipeline-widget");
   if (!widget || widget.dataset.active !== "1") return;
-  const stageLabels = {fetch: "сбор вакансий", score: "оценка", digest: "дайджест"};
+  const stageLabels = {
+    fetch: "сбор вакансий", score: "оценка", digest: "дайджест",
+    check_liked: "проверка «Подходит»", check_archive: "проверка архива", reassess: "переоценка архива",
+  };
   function poll() {
     fetch("/api/pipeline-status").then((r) => r.json()).then((runs) => {
       if (!runs.length) return;

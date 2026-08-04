@@ -12,6 +12,9 @@
                                              чтобы свериться с id для config.yaml
   python -m src.main serve                — веб-интерфейс: список вакансий + tailor по клику
   python -m src.main check-liked          — проверяет актуальность вакансий, отмеченных «по душе»
+  python -m src.main check-archive        — то же самое для «Архива» (decision=not_fit)
+  python -m src.main reassess-archive     — переоценивает живой (не снятый с публикации) архив,
+                                             подходящие по новому score возвращает в «Разбор»
   python -m src.main backup               — резервная копия БД в ./backups/, хранит последние 7
 
 Типичный сценарий (например, из cron раз в день):
@@ -482,22 +485,137 @@ def refresh_vacancy_status(
     return status
 
 
-def cmd_check_liked(cfg: dict) -> None:
+_ACTUALITY_STAGE = {"fit": "check_liked", "not_fit": "check_archive"}
+_ACTUALITY_LABEL = {"fit": "«по душе»/«Подходит»", "not_fit": "«Архив»"}
+
+
+def cmd_check_actuality(cfg: dict, decision: str) -> None:
+    """Проверяет у источника, не сняты ли с публикации вакансии с данным
+    decision ('fit' — ночной check-liked/кнопка на «Подходит», 'not_fit' —
+    кнопка «Проверить актуальность» на «Архиве»). Только HTTP-запросы к
+    источнику, без LLM — быстро даже на тысячах вакансий, но на объёме
+    архива (сотни-тысячи) всё равно оборачиваем в pipeline_runs, чтобы
+    веб-кнопка могла запускать это в фоне (см. settings_run_now в webapp.py)
+    и показывать прогресс, а не держать HTTP-запрос открытым минутами."""
     hh = HHClient(get_hh_config(cfg))
     sj_cfg = get_superjob_config(cfg)
     sj = SuperJobClient(sj_cfg) if sj_cfg else None
     habr = HabrClient()
     storage = Storage(cfg["paths"]["db"])
-    rows = storage.list_scored(decision="fit")
-    log.info("Проверяю актуальность %s вакансий из «по душе»", len(rows))
-    for row in rows:
-        try:
-            status = refresh_vacancy_status(hh, sj, storage, row["id"], row["source"], habr=habr)
-        except Exception as e:  # noqa: BLE001
-            log.warning("Не удалось проверить %s: %s", row["id"], e)
-            continue
-        state = "в архиве/снята" if status["archived"] else "актуальна"
-        log.info("  %s — %s (%s)", row["id"], row["name"], state)
+    rows = storage.list_scored(decision=decision)
+    log.info("Проверяю актуальность %s вакансий из %s", len(rows), _ACTUALITY_LABEL[decision])
+    run_id = storage.start_pipeline_run(_ACTUALITY_STAGE[decision], total=len(rows))
+    archived_count = 0
+    try:
+        for i, row in enumerate(rows, 1):
+            try:
+                status = refresh_vacancy_status(hh, sj, storage, row["id"], row["source"], habr=habr)
+            except Exception as e:  # noqa: BLE001
+                log.warning("Не удалось проверить %s: %s", row["id"], e)
+                storage.update_pipeline_run(run_id, done=i)
+                continue
+            if status["archived"]:
+                archived_count += 1
+            state = "в архиве/снята" if status["archived"] else "актуальна"
+            log.info("  %s — %s (%s)", row["id"], row["name"], state)
+            storage.update_pipeline_run(run_id, done=i)
+    except Exception as e:
+        storage.finish_pipeline_run(run_id, "error", str(e))
+        raise
+    storage.finish_pipeline_run(run_id, "done", f"проверено: {len(rows)}, снято с публикации: {archived_count}")
+
+
+def cmd_check_liked(cfg: dict) -> None:
+    """CLI-имя и поведение оставлены как есть — уже используется в cron.
+    Внутри теперь общая реализация, см. cmd_check_actuality."""
+    cmd_check_actuality(cfg, "fit")
+
+
+def cmd_reassess_archive(cfg: dict) -> None:
+    """Переоценивает архив (decision='not_fit'), исключая снятые с публикации
+    (см. hide_archived в storage.list_scored — та же логика, что скрывает их
+    со страницы «Архив»). Для каждой вакансии — тот же путь, что в обычном
+    cmd_score: сначала минус-слова (бесплатно, без похода в LLM), иначе новый
+    вызов score_vacancy(). Вакансии, чей новый score перевалил порог
+    автоотсечения, возвращаются в «Разбор» (decision=NULL) — остальные
+    остаются в архиве, но с обновлённой оценкой/обоснованием.
+
+    Дорогая операция (одиночный скоринг на весь живой архив — тысячи вызовов
+    LLM), поэтому запускается только по явному действию из /archive (кнопка
+    с подтверждением объёма — см. /archive/reassess/estimate в webapp.py),
+    никогда не как часть ночного cron."""
+    hh = HHClient(get_hh_config(cfg))
+    sj_cfg = get_superjob_config(cfg)
+    sj = SuperJobClient(sj_cfg) if sj_cfg else None
+    habr = HabrClient()
+    storage = Storage(cfg["paths"]["db"])
+    career_base = load_career_base(cfg["paths"]["career_base_md"])
+    provider = get_provider(cfg, "score", storage)
+
+    priority_lines = get_priority_metro_lines(storage)
+    stop_words = [w.lower() for w in get_stop_words(storage)]
+    corrections_note = build_corrections_note(storage.disagreements())
+    auto_reject_max = int(storage.get_setting("auto_reject_max_score", "40"))
+
+    # hide_archived=True здесь означает то же самое, что и на странице «Архив»:
+    # только вакансии, ещё не снятые с публикации по последней проверке
+    # актуальности (см. cmd_check_actuality/refresh_vacancy_status) — снятые
+    # переоценивать смысла нет, их и так не вернуть в «Разбор».
+    rows = storage.list_scored(decision="not_fit", hide_archived=True)
+    log.info("К переоценке: %s живых вакансий из «Архива»", len(rows))
+    run_id = storage.start_pipeline_run("reassess", total=len(rows))
+    returned_count = 0
+    try:
+        for i, row in enumerate(rows, 1):
+            try:
+                full = get_full_vacancy(hh, sj, row["id"], row["source"], habr=habr)
+            except Exception as e:  # noqa: BLE001
+                log.warning("Не удалось получить полную карточку %s: %s. Оцениваю по сниппету.", row["id"], e)
+                full = json.loads(row["raw_json"])
+            text = vacancy_to_text(full, priority_lines)
+            station, line = get_metro(full)
+            metro = {"station": station, "line": line, "priority": bool(line and line in priority_lines)}
+
+            hit = next((w for w in stop_words if w in text.lower()), None)
+            if hit is not None:
+                # минус-слово всё ещё актуально — вакансия остаётся в архиве,
+                # к модели не идём (бесплатно и мгновенно), но обоснование
+                # обновляем, чтобы было видно, что переоценка реально прошла
+                storage.save_score(
+                    row["id"],
+                    {
+                        "fit_score": 0,
+                        "track": "B",
+                        "salary_fit": "не указана",
+                        "red_flags": [f"минус-слово: {hit}"],
+                        "rationale": f"Автоотсев по минус-слову «{hit}» (переоценка архива).",
+                        "recommend": "skip",
+                        "ats_keywords": [],
+                    },
+                    metro,
+                )
+                log.info("[%s/%s] %s — по-прежнему отсев по минус-слову «%s»", i, len(rows), row["name"], hit)
+                storage.update_pipeline_run(run_id, done=i)
+                continue
+
+            result = score_vacancy(provider, career_base, text, corrections_note)
+            storage.record_token_usage(provider.name, "score", provider.last_usage)
+            storage.save_score(row["id"], result, metro)
+            fit_score = result.get("fit_score")
+            if fit_score is not None and fit_score > auto_reject_max:
+                # теперь проходит порог — возвращаем в «Разбор» на свежий взгляд
+                storage.set_decision(row["id"], None, f"переоценка архива: fit_score {fit_score} > {auto_reject_max}")
+                returned_count += 1
+            log.info(
+                "[%s/%s] %s — score=%s recommend=%s%s",
+                i, len(rows), row["name"], result.get("fit_score"), result.get("recommend"),
+                " (возвращена в «Разбор»)" if fit_score is not None and fit_score > auto_reject_max else "",
+            )
+            storage.update_pipeline_run(run_id, done=i)
+    except Exception as e:
+        storage.finish_pipeline_run(run_id, "error", str(e))
+        raise
+    storage.finish_pipeline_run(run_id, "done", f"переоценено: {len(rows)}, возвращено в «Разбор»: {returned_count}")
 
 
 def cmd_backup(cfg: dict, keep: int | None = None) -> None:
@@ -574,6 +692,8 @@ def main() -> None:
     sub.add_parser("dictionaries")
     sub.add_parser("serve")
     sub.add_parser("check-liked")
+    sub.add_parser("check-archive")
+    sub.add_parser("reassess-archive")
     sub.add_parser("backup")
 
     args = parser.parse_args()
@@ -597,6 +717,10 @@ def main() -> None:
         cmd_serve(cfg)
     elif args.command == "check-liked":
         cmd_check_liked(cfg)
+    elif args.command == "check-archive":
+        cmd_check_actuality(cfg, "not_fit")
+    elif args.command == "reassess-archive":
+        cmd_reassess_archive(cfg)
     elif args.command == "backup":
         cmd_backup(cfg)
     else:

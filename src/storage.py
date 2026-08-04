@@ -252,7 +252,7 @@ class Storage:
     }
 
     def _scored_where(
-        self, status: str | None, min_score: int | None, decision: str | None
+        self, status: str | None, min_score: int | None, decision: str | None, hide_archived: bool = False
     ) -> tuple[str, list[Any]]:
         """Общий WHERE для list_scored/count_scored — держим условие в одном месте,
         чтобы счётчик страниц никогда не разъехался с самим списком."""
@@ -269,6 +269,11 @@ class Storage:
         elif decision in ("fit", "not_fit"):
             where += " AND decision = ?"
             params.append(decision)
+        if hide_archived:
+            # снятые с публикации у источника (по последней проверке актуальности,
+            # см. refresh_vacancy_status) — по умолчанию скрываем из «Архива»,
+            # не захламляют список; сами данные никуда не деваются, см. ?show_archived=1
+            where += " AND (archived = 0 OR archived IS NULL)"
         return where, params
 
     def list_scored(
@@ -279,6 +284,7 @@ class Storage:
         sort: str = "score",
         limit: int | None = None,
         offset: int = 0,
+        hide_archived: bool = False,
     ) -> list[sqlite3.Row]:
         """Для веб-интерфейса: все оценённые вакансии, в любом статусе (в отличие от
         top_for_digest, которая намеренно ограничена статусами new/digested).
@@ -290,9 +296,12 @@ class Storage:
         по ссылке") сюда никогда не попадают — это разовая проверка, не часть
         очереди разбора.
 
+        `hide_archived` — исключить вакансии, снятые с публикации у источника
+        (см. `_scored_where`); используется страницей «Архив» по умолчанию.
+
         `limit`/`offset` — пагинация для веб-списков; None (по умолчанию) —
         без ограничения, как раньше (используется там, где нужен весь список)."""
-        where, params = self._scored_where(status, min_score, decision)
+        where, params = self._scored_where(status, min_score, decision, hide_archived)
         query = f"SELECT * FROM vacancies {where} ORDER BY " + self.SORT_OPTIONS.get(
             sort, self.SORT_OPTIONS["score"]
         )
@@ -303,11 +312,15 @@ class Storage:
             return conn.execute(query, params).fetchall()
 
     def count_scored(
-        self, status: str | None = None, min_score: int | None = None, decision: str | None = None
+        self,
+        status: str | None = None,
+        min_score: int | None = None,
+        decision: str | None = None,
+        hide_archived: bool = False,
     ) -> int:
         """То же условие, что и list_scored, но COUNT(*) — для пагинации (сколько всего
         страниц) без вытягивания всех строк целиком."""
-        where, params = self._scored_where(status, min_score, decision)
+        where, params = self._scored_where(status, min_score, decision, hide_archived)
         with self._conn() as conn:
             return conn.execute(f"SELECT COUNT(*) AS cnt FROM vacancies {where}", params).fetchone()["cnt"]
 
@@ -365,6 +378,23 @@ class Storage:
             return conn.execute(
                 "SELECT provider, SUM(total_tokens) AS total FROM token_usage GROUP BY provider"
             ).fetchall()
+
+    def avg_task_tokens(self, task: str, sample: int = 200) -> float | None:
+        """Средний total_tokens за один вызов на задачу ('score'/'tailor') по
+        последним `sample` записям — для оценки стоимости дорогих массовых
+        операций (см. /archive/reassess/estimate) до их запуска. None, если по
+        задаче ещё нет ни одной записи (ничего не считали в этом провайдере)."""
+        with self._conn() as conn:
+            row = conn.execute(
+                """
+                SELECT AVG(total_tokens) AS avg_tokens FROM (
+                    SELECT total_tokens FROM token_usage WHERE task = ?
+                    ORDER BY id DESC LIMIT ?
+                )
+                """,
+                (task, sample),
+            ).fetchone()
+        return row["avg_tokens"] if row and row["avg_tokens"] is not None else None
 
     def start_pipeline_run(self, stage: str, total: int | None = None) -> int:
         """Отмечает начало этапа (fetch/score/digest) — для прогресс-бара на
