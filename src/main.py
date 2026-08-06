@@ -531,6 +531,9 @@ def cmd_check_liked(cfg: dict) -> None:
     cmd_check_actuality(cfg, "fit")
 
 
+REASSESS_STOP_SETTING = "reassess_stop_requested"
+
+
 def cmd_reassess_archive(cfg: dict) -> None:
     """Переоценивает архив (decision='not_fit'), исключая снятые с публикации
     (см. hide_archived в storage.list_scored — та же логика, что скрывает их
@@ -543,7 +546,13 @@ def cmd_reassess_archive(cfg: dict) -> None:
     Дорогая операция (одиночный скоринг на весь живой архив — тысячи вызовов
     LLM), поэтому запускается только по явному действию из /archive (кнопка
     с подтверждением объёма — см. /archive/reassess/estimate в webapp.py),
-    никогда не как часть ночного cron."""
+    никогда не как часть ночного cron.
+
+    Проверяет флаг REASSESS_STOP_SETTING в settings перед каждой вакансией —
+    так кнопка «Остановить» на /archive (см. archive_reassess_stop в webapp.py)
+    может прервать прогон между вакансиями. Всё, что уже переоценено до
+    остановки, остаётся сохранённым (save_score/set_decision — по одной
+    вакансии за раз, не единой транзакцией на весь прогон)."""
     hh = HHClient(get_hh_config(cfg))
     sj_cfg = get_superjob_config(cfg)
     sj = SuperJobClient(sj_cfg) if sj_cfg else None
@@ -556,6 +565,7 @@ def cmd_reassess_archive(cfg: dict) -> None:
     stop_words = [w.lower() for w in get_stop_words(storage)]
     corrections_note = build_corrections_note(storage.disagreements())
     auto_reject_max = int(storage.get_setting("auto_reject_max_score", "40"))
+    storage.set_setting(REASSESS_STOP_SETTING, "0")
 
     # hide_archived=True здесь означает то же самое, что и на странице «Архив»:
     # только вакансии, ещё не снятые с публикации по последней проверке
@@ -567,6 +577,15 @@ def cmd_reassess_archive(cfg: dict) -> None:
     returned_count = 0
     try:
         for i, row in enumerate(rows, 1):
+            if storage.get_setting(REASSESS_STOP_SETTING) == "1":
+                storage.set_setting(REASSESS_STOP_SETTING, "0")
+                storage.finish_pipeline_run(
+                    run_id, "stopped",
+                    f"остановлено пользователем: переоценено {i - 1}/{len(rows)}, "
+                    f"возвращено в «Разбор»: {returned_count}",
+                )
+                log.info("Переоценка архива остановлена пользователем на %s/%s", i - 1, len(rows))
+                return
             try:
                 full = get_full_vacancy(hh, sj, row["id"], row["source"], habr=habr)
             except Exception as e:  # noqa: BLE001

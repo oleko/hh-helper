@@ -54,10 +54,11 @@ async function checkActuality() {
 <div class="chart-wrap" style="margin-bottom:1rem;">
   <button type="button" id="archive-check-actuality-btn" onclick="archiveCheckActuality()">🔄 Проверить актуальность архива</button>
   <button type="button" id="archive-reassess-btn" onclick="archiveReassess()">♻️ Переоценить архив</button>
+  <button type="button" id="archive-reassess-stop-btn" onclick="archiveReassessStop()" style="display:none;">⏹ Остановить переоценку</button>
   {% if hidden_archived_count is not none %}
-  <a href="{{ url_for('archive_page', min_score=min_score, sort=sort, show_archived=1) }}">Показать скрытые ({{ hidden_archived_count }})</a>
+  <a href="{{ url_for('archive_page', min_score=min_score, sort=sort, search=search, show_archived=1) }}">Показать скрытые ({{ hidden_archived_count }})</a>
   {% elif show_archived %}
-  <a href="{{ url_for('archive_page', min_score=min_score, sort=sort, show_archived=0) }}">Скрыть удалённые</a>
+  <a href="{{ url_for('archive_page', min_score=min_score, sort=sort, search=search, show_archived=0) }}">Скрыть удалённые</a>
   {% endif %}
   <div><span id="archive-check-actuality-msg"></span><span id="archive-reassess-msg"></span></div>
   <p style="color:#666; font-size:0.85rem; margin:0.4rem 0 0;">
@@ -115,8 +116,11 @@ async function archiveReassess() {
       ? `~${Math.round(est.est_tokens / 1000)}к токенов`
       : "оценка токенов недоступна (ещё не было ни одного скоринга)";
     const ok = confirm(
+      "⚠️ Осторожно! Переоценка архива может потребовать большого числа токенов. " +
+      "Оцените свои возможности до начала процесса.\n\n" +
       `Будет переоценено ~${est.count} вакансий из живого архива, ${tokensText}, ` +
-      `ориентировочно ~${est.est_minutes} мин. Дорогая операция, идёт в фоне. Продолжить?`
+      `ориентировочно ~${est.est_minutes} мин. Идёт в фоне, можно остановить кнопкой ` +
+      `«Остановить переоценку» в любой момент — уже переоценённое сохранится. Продолжить?`
     );
     if (!ok) {
       msg.textContent = "";
@@ -132,7 +136,9 @@ async function archiveReassess() {
     }
     const data = await resp.json();
     if (data.ok) {
-      msg.textContent = "Запущено, прогресс — на главной.";
+      reassessTracking = true;
+      setReassessRunning(true, "Запущено, прогресс — на главной.");
+      pollReassessStatus();
     } else {
       msg.textContent = "Ошибка: " + (data.msg || "неизвестная");
       btn.disabled = false;
@@ -142,6 +148,63 @@ async function archiveReassess() {
     btn.disabled = false;
   }
 }
+
+function setReassessRunning(running, message) {
+  const startBtn = document.getElementById("archive-reassess-btn");
+  const stopBtn = document.getElementById("archive-reassess-stop-btn");
+  const msg = document.getElementById("archive-reassess-msg");
+  startBtn.disabled = running;
+  startBtn.style.display = running ? "none" : "";
+  stopBtn.style.display = running ? "" : "none";
+  stopBtn.disabled = false;
+  if (message !== undefined) msg.textContent = message;
+}
+
+async function archiveReassessStop() {
+  const stopBtn = document.getElementById("archive-reassess-stop-btn");
+  const msg = document.getElementById("archive-reassess-msg");
+  stopBtn.disabled = true;
+  msg.textContent = "Останавливаю…";
+  try {
+    const resp = await fetch("/archive/reassess/stop", {method: "POST"});
+    const data = await resp.json();
+    msg.textContent = data.ok
+      ? "Останавливаю — доработает текущую вакансию и выйдет, уже переоценённое сохранено."
+      : "Не удалось остановить.";
+  } catch (e) {
+    msg.textContent = "Ошибка запроса: " + e;
+    stopBtn.disabled = false;
+  }
+}
+
+// reassessTracking — только когда МЫ реально видели прогон "running" (по клику
+// или уже идущим при открытии страницы). Без этого флага холодная загрузка
+// страницы после ЛЮБОЙ прошлой (уже готовой) переоценки зациклилась бы в
+// location.reload(), т.к. latest_pipeline_runs(1) навсегда останется на
+// последнем прогоне stage=reassess, пока не запустится что-то ещё.
+let reassessTracking = false;
+async function pollReassessStatus() {
+  try {
+    const resp = await fetch("/api/pipeline-status");
+    const runs = await resp.json();
+    const latest = runs[0];
+    const running = !!(latest && latest.stage === "reassess" && latest.status === "running");
+    if (running) {
+      reassessTracking = true;
+      setReassessRunning(true, `Выполняется: ${latest.done}/${latest.total || "?"}`);
+      setTimeout(pollReassessStatus, 5000);
+    } else {
+      setReassessRunning(false);
+      if (reassessTracking) {
+        reassessTracking = false;
+        location.reload();
+      }
+    }
+  } catch (e) {
+    setTimeout(pollReassessStatus, 5000);
+  }
+}
+pollReassessStatus();
 </script>
 {% endif %}
 
@@ -219,6 +282,9 @@ async function archiveReassess() {
 </details>
 
 <form class="filters" method="get">
+  <label>Поиск:
+    <input type="text" name="search" value="{{ search }}" placeholder="название/работодатель" style="width:12rem">
+  </label>
   <label>Мин. score:
     <input type="number" name="min_score" value="{{ min_score }}" min="0" max="100"
            style="width:4rem" onchange="this.form.submit()">
@@ -231,6 +297,10 @@ async function archiveReassess() {
       <option value="old_unreviewed" {{ "selected" if sort == "old_unreviewed" }}>сначала старые непросмотренные</option>
     </select>
   </label>
+  <button type="submit">Найти</button>
+  {% if page == "archive" and show_archived %}
+  <input type="hidden" name="show_archived" value="1">
+  {% endif %}
 </form>
 
 {% if not vacancies %}
@@ -309,11 +379,11 @@ function updateNavCounts(c) {
 {% if total_pages > 1 %}
 <p class="filters" style="display:flex; align-items:center; gap:0.8rem;">
   {% if page_num > 1 %}
-  <a href="{{ url_for(request.endpoint, status=status, min_score=min_score, sort=sort, page=page_num-1) }}">« Назад</a>
+  <a href="{{ url_for(request.endpoint, status=status, min_score=min_score, sort=sort, search=search, show_archived=(1 if show_archived else none), page=page_num-1) }}">« Назад</a>
   {% endif %}
   <span style="color:#666; font-size:0.85rem;">Страница {{ page_num }} из {{ total_pages }} ({{ total }} вакансий)</span>
   {% if page_num < total_pages %}
-  <a href="{{ url_for(request.endpoint, status=status, min_score=min_score, sort=sort, page=page_num+1) }}">Вперёд »</a>
+  <a href="{{ url_for(request.endpoint, status=status, min_score=min_score, sort=sort, search=search, show_archived=(1 if show_archived else none), page=page_num+1) }}">Вперёд »</a>
   {% endif %}
 </p>
 {% endif %}

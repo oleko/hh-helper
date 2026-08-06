@@ -38,6 +38,7 @@ from .habr_client import HabrApiError, HabrClient
 from .hh_client import HHApiError, HHClient
 from .llm_provider import get_provider
 from .main import (
+    REASSESS_STOP_SETTING,
     get_filter_selection,
     get_gigachat_config,
     get_hh_config,
@@ -310,17 +311,20 @@ def create_app(cfg: dict) -> Flask:
         status = request.args.get("status") or None
         min_score = request.args.get("min_score", type=int)
         sort = request.args.get("sort") or "score"
+        search = (request.args.get("search") or "").strip() or None
         # скрытие снятых с публикации вакансий — только на «Архиве», по умолчанию
         # включено; ?show_archived=1 временно показывает всё (ничего не удалено,
         # просто фильтр отображения, см. storage._scored_where)
         show_archived = request.args.get("show_archived") == "1"
         hide_archived = page == "archive" and not show_archived
-        total = storage.count_scored(status=status, min_score=min_score, decision=decision, hide_archived=hide_archived)
+        total = storage.count_scored(
+            status=status, min_score=min_score, decision=decision, hide_archived=hide_archived, search=search,
+        )
         total_pages = max((total + PAGE_SIZE - 1) // PAGE_SIZE, 1)
         page_num = min(max(request.args.get("page", 1, type=int), 1), total_pages)
         rows = storage.list_scored(
             status=status, min_score=min_score, decision=decision, sort=sort,
-            limit=PAGE_SIZE, offset=(page_num - 1) * PAGE_SIZE, hide_archived=hide_archived,
+            limit=PAGE_SIZE, offset=(page_num - 1) * PAGE_SIZE, hide_archived=hide_archived, search=search,
         )
         vacancies = [_row_to_view(r, out_dir) for r in rows]
         pipeline_runs = (
@@ -328,7 +332,7 @@ def create_app(cfg: dict) -> Flask:
         )
         hidden_archived_count = None
         if page == "archive" and not show_archived:
-            total_all = storage.count_scored(status=status, min_score=min_score, decision=decision)
+            total_all = storage.count_scored(status=status, min_score=min_score, decision=decision, search=search)
             hidden_archived_count = total_all - total
         return render_template(
             "list.html",
@@ -337,6 +341,7 @@ def create_app(cfg: dict) -> Flask:
             status=status or "",
             min_score=min_score or "",
             sort=sort,
+            search=search or "",
             page_num=page_num,
             total_pages=total_pages,
             total=total,
@@ -444,6 +449,17 @@ def create_app(cfg: dict) -> Flask:
         if _pipeline_busy():
             abort(409, "Прогон уже выполняется.")
         _run_in_background("reassess-archive")
+        return jsonify({"ok": True})
+
+    @app.post("/archive/reassess/stop")
+    def archive_reassess_stop():
+        """Просит выполняющуюся переоценку (cmd_reassess_archive) остановиться
+        между вакансиями — через флаг в settings, т.к. фоновый прогон это
+        отдельный процесс (subprocess.Popen), убить его напрямую из веб-запроса
+        нечем. Уже переоценённые до остановки вакансии остаются как есть —
+        каждая сохраняется сразу после своего скоринга, не одной транзакцией
+        на весь прогон."""
+        storage.set_setting(REASSESS_STOP_SETTING, "1")
         return jsonify({"ok": True})
 
     @app.get("/settings")
@@ -876,6 +892,59 @@ def create_app(cfg: dict) -> Flask:
         if row is None:
             abort(404)
         refresh_vacancy_status(hh, sj, storage, vacancy_id, row["source"], habr=habr)
+        return redirect(url_for("vacancy_detail", vacancy_id=vacancy_id))
+
+    @app.post("/vacancy/<vacancy_id>/reassess")
+    def vacancy_reassess(vacancy_id: str):
+        """Переоценивает одну конкретную вакансию прямо сейчас — один
+        синхронный вызов модели (пара секунд), в отличие от массовой
+        /archive/reassess. Для случая "не хочу ждать/оплачивать переоценку
+        всего архива ради одной вакансии". Тот же путь, что и cmd_reassess_archive
+        построчно: минус-слова бесплатно, иначе score_vacancy(); если вакансия
+        была в «Архиве» и новый score перевалил порог — возвращается в «Разбор»."""
+        row = storage.get(vacancy_id)
+        if row is None:
+            abort(404)
+        try:
+            full = get_full_vacancy(hh, sj, vacancy_id, row["source"], habr=habr)
+        except _SOURCE_ERRORS as e:
+            log.warning("Переоценка %s: не удалось получить полную карточку (%s), использую сохранённые данные.", vacancy_id, e)
+            full = json.loads(row["raw_json"] or "{}")
+        priority_lines = get_priority_metro_lines(storage)
+        text = vacancy_to_text(full, priority_lines)
+        station, line = get_metro(full)
+        metro = {"station": station, "line": line, "priority": bool(line and line in priority_lines)}
+
+        stop_words = [w.lower() for w in get_stop_words(storage)]
+        hit = next((w for w in stop_words if w in text.lower()), None)
+        returned_to_unsorted = False
+        if hit is not None:
+            storage.save_score(
+                vacancy_id,
+                {
+                    "fit_score": 0,
+                    "track": "B",
+                    "salary_fit": "не указана",
+                    "red_flags": [f"минус-слово: {hit}"],
+                    "rationale": f"Автоотсев по минус-слову «{hit}» (ручная переоценка).",
+                    "recommend": "skip",
+                    "ats_keywords": [],
+                },
+                metro,
+            )
+        else:
+            corrections_note = build_corrections_note(storage.disagreements())
+            provider = get_provider(cfg, "score", storage)
+            result = score_vacancy(provider, career_state["text"], text, corrections_note)
+            storage.record_token_usage(provider.name, "score", provider.last_usage)
+            storage.save_score(vacancy_id, result, metro)
+            fit_score = result.get("fit_score")
+            auto_reject_max = int(storage.get_setting("auto_reject_max_score", "40"))
+            if row["decision"] == "not_fit" and fit_score is not None and fit_score > auto_reject_max:
+                storage.set_decision(vacancy_id, None, f"переоценка вручную: fit_score {fit_score} > {auto_reject_max}")
+                returned_to_unsorted = True
+        if request.form.get("ajax"):
+            return jsonify({"ok": True, "returned_to_unsorted": returned_to_unsorted})
         return redirect(url_for("vacancy_detail", vacancy_id=vacancy_id))
 
     @app.get("/tool/score-url")

@@ -138,6 +138,10 @@ class Storage:
     def _conn(self) -> Iterator[sqlite3.Connection]:
         conn = sqlite3.connect(self.db_path)
         conn.row_factory = sqlite3.Row
+        # SQLite's built-in LIKE/LOWER only case-fold ASCII (no ICU extension
+        # here) — регистрируем питоновский LOWER для поиска по названию/
+        # работодателю на кириллице (см. _scored_where search=).
+        conn.create_function("lower_ru", 1, lambda s: s.lower() if s is not None else None)
         try:
             yield conn
             conn.commit()
@@ -252,7 +256,12 @@ class Storage:
     }
 
     def _scored_where(
-        self, status: str | None, min_score: int | None, decision: str | None, hide_archived: bool = False
+        self,
+        status: str | None,
+        min_score: int | None,
+        decision: str | None,
+        hide_archived: bool = False,
+        search: str | None = None,
     ) -> tuple[str, list[Any]]:
         """Общий WHERE для list_scored/count_scored — держим условие в одном месте,
         чтобы счётчик страниц никогда не разъехался с самим списком."""
@@ -274,6 +283,12 @@ class Storage:
             # см. refresh_vacancy_status) — по умолчанию скрываем из «Архива»,
             # не захламляют список; сами данные никуда не деваются, см. ?show_archived=1
             where += " AND (archived = 0 OR archived IS NULL)"
+        if search:
+            # lower_ru — питоновский LOWER (см. _conn) вместо родного SQL LOWER/LIKE,
+            # которые у SQLite без ICU не сворачивают регистр кириллицы
+            where += " AND (lower_ru(name) LIKE ? OR lower_ru(employer) LIKE ?)"
+            like = f"%{search.lower()}%"
+            params += [like, like]
         return where, params
 
     def list_scored(
@@ -285,6 +300,7 @@ class Storage:
         limit: int | None = None,
         offset: int = 0,
         hide_archived: bool = False,
+        search: str | None = None,
     ) -> list[sqlite3.Row]:
         """Для веб-интерфейса: все оценённые вакансии, в любом статусе (в отличие от
         top_for_digest, которая намеренно ограничена статусами new/digested).
@@ -299,9 +315,12 @@ class Storage:
         `hide_archived` — исключить вакансии, снятые с публикации у источника
         (см. `_scored_where`); используется страницей «Архив» по умолчанию.
 
+        `search` — подстрока в названии вакансии или работодателе (регистронезависимо,
+        включая кириллицу), для текстового фильтра на списках.
+
         `limit`/`offset` — пагинация для веб-списков; None (по умолчанию) —
         без ограничения, как раньше (используется там, где нужен весь список)."""
-        where, params = self._scored_where(status, min_score, decision, hide_archived)
+        where, params = self._scored_where(status, min_score, decision, hide_archived, search)
         query = f"SELECT * FROM vacancies {where} ORDER BY " + self.SORT_OPTIONS.get(
             sort, self.SORT_OPTIONS["score"]
         )
@@ -317,10 +336,11 @@ class Storage:
         min_score: int | None = None,
         decision: str | None = None,
         hide_archived: bool = False,
+        search: str | None = None,
     ) -> int:
         """То же условие, что и list_scored, но COUNT(*) — для пагинации (сколько всего
         страниц) без вытягивания всех строк целиком."""
-        where, params = self._scored_where(status, min_score, decision, hide_archived)
+        where, params = self._scored_where(status, min_score, decision, hide_archived, search)
         with self._conn() as conn:
             return conn.execute(f"SELECT COUNT(*) AS cnt FROM vacancies {where}", params).fetchone()["cnt"]
 

@@ -45,6 +45,10 @@
 <form class="inline" method="post" action="{{ url_for('vacancy_check', vacancy_id=v.id) }}">
   <button type="submit">Проверить актуальность</button>
 </form>
+<form class="inline" method="post" action="{{ url_for('vacancy_reassess', vacancy_id=v.id) }}"
+      onsubmit="this.querySelector('button').disabled=true; this.querySelector('button').textContent='⏳ Переоцениваю…';">
+  <button type="submit" title="Заново прогнать через модель прямо сейчас">🔁 Переоценить</button>
+</form>
 <br><br>
 <form method="post" action="{{ url_for('vacancy_decide', vacancy_id=v.id) }}">
   <input type="text" name="reason" placeholder="Почему? (необязательно)"
