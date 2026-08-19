@@ -756,10 +756,14 @@ def create_app(cfg: dict) -> Flask:
                 sj_results = [t for t in geo_cache["superjob"] if ql in t["name"].lower()][:40]
         return render_template("areas.html", page="tool", q=q, hh_results=hh_results, sj_results=sj_results)
 
-    def _generate_tailor_files(vacancy_id: str, text: str) -> None:
+    def _generate_tailor_files(vacancy_id: str, text: str) -> bool:
         """Общий код генерации 4 файлов (notes/resume_full/letter/docx) —
         используется и обычной кнопкой на карточке, и инструментом "вакансия
-        по ссылке" (см. score_url_submit)."""
+        по ссылке" (см. score_url_submit). Возвращает True, если resume.docx
+        тоже успешно перезаписан; False — текст (notes/resume_full/letter,
+        уже отрендеренные на странице) сохранён, но .docx не обновился —
+        см. try/except ниже, вызывающие превращают это в предупреждение,
+        не в падение запроса."""
         provider = get_provider(cfg, "tailor", storage)
         notes, resume_full, letter = tailor_for_vacancy(provider, career_state["text"], text)
         storage.record_token_usage(provider.name, "tailor", provider.last_usage)
@@ -769,7 +773,18 @@ def create_app(cfg: dict) -> Flask:
         (v_out_dir / "resume_full.md").write_text(resume_full, encoding="utf-8")
         (v_out_dir / "cover_letter.txt").write_text(letter, encoding="utf-8")
         (v_out_dir / "vacancy.txt").write_text(text, encoding="utf-8")
-        build_resume_docx(resume_full, career_state["candidate_name"]).save(v_out_dir / "resume.docx")
+        try:
+            build_resume_docx(resume_full, career_state["candidate_name"]).save(v_out_dir / "resume.docx")
+            return True
+        except OSError as e:
+            # самый частый случай — resume.docx открыт в Word (или похожей
+            # программе) на машине, где запущено приложение: Windows держит на
+            # открытом файле эксклюзивную блокировку записи, .save() падает с
+            # PermissionError. Токены уже потрачены и текст уже сохранён —
+            # ронять весь запрос из-за одного не перезаписавшегося .docx
+            # не стоит, вызывающие покажут предупреждение вместо падения.
+            log.warning("Не удалось перезаписать resume.docx для %s: %s", vacancy_id, e)
+            return False
 
     @app.get("/vacancy/<vacancy_id>")
     def vacancy_detail(vacancy_id: str):
@@ -811,6 +826,7 @@ def create_app(cfg: dict) -> Flask:
             v=_row_to_view(row, out_dir),
             description_html=description_html,
             unavailable_notice=unavailable_notice,
+            docx_warning=request.args.get("docx_warning") == "1",
             notes=notes,
             resume_full=resume_full,
             letter=letter,
@@ -835,8 +851,8 @@ def create_app(cfg: dict) -> Flask:
                     "нет — резюме и письмо сгенерировать не из чего.",
                 )
             text = saved_text_path.read_text(encoding="utf-8")
-        _generate_tailor_files(vacancy_id, text)
-        return redirect(url_for("vacancy_detail", vacancy_id=vacancy_id))
+        docx_ok = _generate_tailor_files(vacancy_id, text)
+        return redirect(url_for("vacancy_detail", vacancy_id=vacancy_id, docx_warning=None if docx_ok else "1"))
 
     @app.get("/vacancy/<vacancy_id>/resume.docx")
     def vacancy_resume_docx(vacancy_id: str):
@@ -992,7 +1008,7 @@ def create_app(cfg: dict) -> Flask:
             station, line = get_metro(full)
             metro = {"station": station, "line": line, "priority": bool(line and line in priority_lines)}
             storage.save_score(vacancy_id, result, metro)
-        _generate_tailor_files(vacancy_id, text)
-        return redirect(url_for("vacancy_detail", vacancy_id=vacancy_id))
+        docx_ok = _generate_tailor_files(vacancy_id, text)
+        return redirect(url_for("vacancy_detail", vacancy_id=vacancy_id, docx_warning=None if docx_ok else "1"))
 
     return app
