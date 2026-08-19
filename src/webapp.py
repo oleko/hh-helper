@@ -368,16 +368,22 @@ def create_app(cfg: dict) -> Flask:
         секунд — в отличие от fetch/score, отдельный subprocess не нужен."""
         rows = storage.list_scored(decision="fit")
         archived_count = 0
+        moved_count = 0
         error_count = 0
         for row in rows:
             try:
                 status = refresh_vacancy_status(hh, sj, storage, row["id"], row["source"], habr=habr)
                 if status["archived"]:
                     archived_count += 1
+                if status["moved_to_archive"]:
+                    moved_count += 1
             except Exception as e:  # noqa: BLE001
                 log.warning("check-actuality: не удалось проверить %s: %s", row["id"], e)
                 error_count += 1
-        return jsonify({"ok": True, "total": len(rows), "archived": archived_count, "errors": error_count})
+        return jsonify({
+            "ok": True, "total": len(rows), "archived": archived_count,
+            "moved": moved_count, "errors": error_count,
+        })
 
     @app.get("/archive")
     def archive_page():

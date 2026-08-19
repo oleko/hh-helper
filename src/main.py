@@ -479,9 +479,27 @@ def refresh_vacancy_status(
     habr: HabrClient | None = None,
 ) -> dict:
     """Дёргает источник (hh.ru/SuperJob/Хабр) за актуальным статусом вакансии и
-    сохраняет в БД. Общий код для ручной кнопки в веб-интерфейсе и для cmd_check_liked."""
+    сохраняет в БД. Общий код для ручной кнопки в веб-интерфейсе и для
+    cmd_check_liked/cmd_check_actuality.
+
+    Источники не восстанавливают снятые объявления — если вакансия была
+    «Подходит» (decision='fit') и оказалась снята с публикации, она уже
+    никогда не станет доступна для отклика повторно, поэтому решение
+    автоматически переводится в «Архив» (decision='not_fit') вместо того,
+    чтобы просто повесить значок 🗄 и оставить её висеть на вкладке «Подходит»
+    как будто с ней ещё можно что-то сделать."""
     status = get_vacancy_status(hh, sj, vacancy_id, source, habr=habr)
     storage.set_archived(vacancy_id, status["archived"])
+    status["moved_to_archive"] = False
+    if status["archived"]:
+        row = storage.get(vacancy_id)
+        if row is not None and row["decision"] == "fit":
+            storage.set_decision(
+                vacancy_id, "not_fit",
+                "автоматически: снята с публикации у источника, повторно недоступна",
+            )
+            storage.set_liked(vacancy_id, False)
+            status["moved_to_archive"] = True
     return status
 
 
@@ -506,6 +524,7 @@ def cmd_check_actuality(cfg: dict, decision: str) -> None:
     log.info("Проверяю актуальность %s вакансий из %s", len(rows), _ACTUALITY_LABEL[decision])
     run_id = storage.start_pipeline_run(_ACTUALITY_STAGE[decision], total=len(rows))
     archived_count = 0
+    moved_count = 0
     try:
         for i, row in enumerate(rows, 1):
             try:
@@ -516,13 +535,22 @@ def cmd_check_actuality(cfg: dict, decision: str) -> None:
                 continue
             if status["archived"]:
                 archived_count += 1
-            state = "в архиве/снята" if status["archived"] else "актуальна"
+            if status["moved_to_archive"]:
+                moved_count += 1
+                state = "снята с публикации — перемещена в «Архив»"
+            elif status["archived"]:
+                state = "в архиве/снята"
+            else:
+                state = "актуальна"
             log.info("  %s — %s (%s)", row["id"], row["name"], state)
             storage.update_pipeline_run(run_id, done=i)
     except Exception as e:
         storage.finish_pipeline_run(run_id, "error", str(e))
         raise
-    storage.finish_pipeline_run(run_id, "done", f"проверено: {len(rows)}, снято с публикации: {archived_count}")
+    message = f"проверено: {len(rows)}, снято с публикации: {archived_count}"
+    if moved_count:
+        message += f", перемещено в «Архив»: {moved_count}"
+    storage.finish_pipeline_run(run_id, "done", message)
 
 
 def cmd_check_liked(cfg: dict) -> None:

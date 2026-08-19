@@ -18,8 +18,9 @@
   <span id="check-actuality-msg"></span>
   <p style="color:#666; font-size:0.85rem; margin:0.4rem 0 0;">
     Спрашивает у источника (hh.ru/SuperJob/Хабр), не сняты ли эти вакансии с
-    публикации — обновляет значок 🗄 у каждой. То же самое, что автоматически
-    по ночам делает <code>check-liked</code>, только сразу и по клику.</p>
+    публикации. Снятые уже не станут доступны повторно, поэтому автоматически
+    переезжают в «Архив» вместо значка 🗄 на этой вкладке. То же самое, что
+    автоматически по ночам делает <code>check-liked</code>, только сразу и по клику.</p>
 </div>
 <script>
 async function checkActuality() {
@@ -33,7 +34,8 @@ async function checkActuality() {
     const resp = await fetch("/liked/check-actuality", {method: "POST"});
     const data = await resp.json();
     if (data.ok) {
-      msg.textContent = `Проверено: ${data.total}, в архиве/снято: ${data.archived}` +
+      msg.textContent = `Проверено: ${data.total}, снято с публикации: ${data.archived}` +
+        (data.moved ? `, перемещено в «Архив»: ${data.moved}` : "") +
         (data.errors ? `, ошибок: ${data.errors}` : "");
       setTimeout(() => location.reload(), 1200);
     } else {
