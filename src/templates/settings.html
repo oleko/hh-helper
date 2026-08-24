@@ -322,6 +322,29 @@ async function generateSearchQueries(btn) {
   }
 }
 
+async function generateCareerAdvice(btn) {
+  const status = document.getElementById("career-advice-status");
+  const panel = document.getElementById("career-advice-panel");
+  status.textContent = "Анализирую...";
+  panel.style.display = "none";
+  const restore = setLoading(btn, "Анализирую…");
+  try {
+    const resp = await fetch("/settings/career-base/advice", {method: "POST"});
+    const data = await resp.json();
+    if (!data.ok) {
+      status.textContent = "Ошибка: " + data.msg;
+      return;
+    }
+    panel.textContent = data.advice;
+    panel.style.display = "block";
+    status.textContent = `Готово — на основе ${data.sample_size} из ${data.total_fit} вакансий «Подходит».`;
+  } catch (e) {
+    status.textContent = "Ошибка запроса: " + e;
+  } finally {
+    restore();
+  }
+}
+
 async function runNow() {
   const btn = document.getElementById("run-now-btn");
   const msg = document.getElementById("run-now-msg");
@@ -452,5 +475,14 @@ document.addEventListener("DOMContentLoaded", () => {
     <br><br>
     <button type="submit">Сохранить карьерную базу</button>
   </form>
+  <hr style="margin:1rem 0; border:none; border-top:1px solid #ddd;">
+  <button type="button" id="career-advice-btn" onclick="generateCareerAdvice(this)">💡 Совет по правке базы</button>
+  <span id="career-advice-status"></span>
+  <p style="color:#666; font-size:0.85rem; margin:0.4rem 0 0;">
+    Смотрит на все вакансии «Подходит» (та же тяжёлая модель, что пишет резюме/письма) и
+    предлагает, что изменить в базе для более релевантных вакансий и резюме. Только показывает
+    совет — сам ничего в базе не правит, вносить правки в текстовое поле выше нужно вручную.</p>
+  <div id="career-advice-panel" style="display:none; margin-top:0.6rem; padding:0.8rem;
+       background:#f8f9fa; border-radius:4px; white-space:pre-wrap; font-size:0.9rem;"></div>
 </div>
 {% endblock %}

@@ -57,7 +57,7 @@ from .sources import get_full_vacancy, get_vacancy_status, parse_vacancy_url
 from .storage import Storage
 from .superjob_client import SuperJobApiError, SuperJobClient
 from .superjob_client import prefixed_id as sj_prefixed_id
-from .tailor import generate_search_queries, tailor_for_vacancy
+from .tailor import generate_career_base_advice, generate_search_queries, tailor_for_vacancy
 
 _SOURCE_ERRORS = (HHApiError, SuperJobApiError, HabrApiError)
 
@@ -740,6 +740,44 @@ def create_app(cfg: dict) -> Flask:
         career_state["candidate_name"] = extract_candidate_name(text)
         return redirect(url_for("settings_page"))
 
+    _CAREER_ADVICE_SAMPLE_LIMIT = 40
+
+    @app.post("/settings/career-base/advice")
+    def settings_career_base_advice():
+        """Совет по правке карьерной базы: обзор вакансий «Подходит» через
+        tailor-провайдер (та же тяжёлая модель, что пишет резюме/письма) — как
+        и черновик поисковых фраз выше, результат только показывается, ничего
+        не сохраняет и не правит в career_base.md автоматически."""
+        rows = storage.list_scored(decision="fit")  # sort="score" по умолчанию — сильнейшие вперёд
+        if not rows:
+            return jsonify({"ok": False, "msg": "Пока нет ни одной вакансии «Подходит» — не с чем сравнивать."})
+        sample = rows[:_CAREER_ADVICE_SAMPLE_LIMIT]
+        lines = []
+        for r in sample:
+            red_flags = ", ".join(json.loads(r["red_flags"] or "[]")) or "—"
+            rationale = (r["rationale"] or "").strip().replace("\n", " ")
+            if len(rationale) > 200:
+                rationale = rationale[:200] + "…"
+            lines.append(
+                f"- {r['name']} ({r['employer'] or '—'}), score={r['score']}, track={r['track'] or '?'}, "
+                f"ЗП: {r['salary_fit'] or 'не указана'}, флаги: {red_flags}\n  Обоснование: {rationale}"
+            )
+        summary = "\n".join(lines)
+        try:
+            provider = get_provider(cfg, "tailor", storage)
+            advice = generate_career_base_advice(provider, career_state["text"], summary)
+            storage.record_token_usage(provider.name, "tailor", provider.last_usage)
+            return jsonify({
+                "ok": True,
+                "advice": advice,
+                "sample_size": len(sample),
+                "total_fit": len(rows),
+            })
+        except SystemExit as e:
+            return jsonify({"ok": False, "msg": str(e)})
+        except Exception as e:
+            return jsonify({"ok": False, "msg": str(e)})
+
     @app.get("/tool/areas")
     def areas_lookup():
         q = (request.args.get("q") or "").strip()
@@ -1001,14 +1039,48 @@ def create_app(cfg: dict) -> Flask:
         priority_lines = get_priority_metro_lines(storage)
         text = vacancy_to_text(full, priority_lines)
         if row["score"] is None:
-            corrections_note = build_corrections_note(storage.disagreements())
-            provider = get_provider(cfg, "score", storage)
-            result = score_vacancy(provider, career_state["text"], text, corrections_note)
-            storage.record_token_usage(provider.name, "score", provider.last_usage)
+            # тот же путь, что и обычный cmd_score: сначала минус-слова (бесплатно,
+            # без похода в LLM), иначе скоринг + автоотсев по тому же порогу —
+            # вакансия по ссылке теперь ведёт себя как вакансии из обычного сбора
+            # (см. комментарий у origin в storage.py), а не живёт только на своей
+            # карточке. Резюме/письмо здесь больше не готовятся автоматически —
+            # только по клику «Подготовить резюме и письмо» на самой карточке,
+            # как и для любой другой вакансии.
             station, line = get_metro(full)
             metro = {"station": station, "line": line, "priority": bool(line and line in priority_lines)}
-            storage.save_score(vacancy_id, result, metro)
-        docx_ok = _generate_tailor_files(vacancy_id, text)
-        return redirect(url_for("vacancy_detail", vacancy_id=vacancy_id, docx_warning=None if docx_ok else "1"))
+            stop_words = [w.lower() for w in get_stop_words(storage)]
+            hit = next((w for w in stop_words if w in text.lower()), None)
+            if hit is not None:
+                storage.save_score(
+                    vacancy_id,
+                    {
+                        "fit_score": 0,
+                        "track": "B",
+                        "salary_fit": "не указана",
+                        "red_flags": [f"минус-слово: {hit}"],
+                        "rationale": f"Автоотсев по минус-слову «{hit}».",
+                        "recommend": "skip",
+                        "ats_keywords": [],
+                    },
+                    metro,
+                )
+                storage.set_decision(vacancy_id, "not_fit", f"минус-слово: {hit}")
+                storage.set_liked(vacancy_id, False)
+                storage.mark_status(vacancy_id, "skip")
+            else:
+                corrections_note = build_corrections_note(storage.disagreements())
+                provider = get_provider(cfg, "score", storage)
+                result = score_vacancy(provider, career_state["text"], text, corrections_note)
+                storage.record_token_usage(provider.name, "score", provider.last_usage)
+                storage.save_score(vacancy_id, result, metro)
+                fit_score = result.get("fit_score")
+                auto_reject_max = int(storage.get_setting("auto_reject_max_score", "40"))
+                if fit_score is not None and fit_score <= auto_reject_max:
+                    storage.set_decision(
+                        vacancy_id, "not_fit", f"автоматически: fit_score {fit_score} ≤ {auto_reject_max}"
+                    )
+                    storage.set_liked(vacancy_id, False)
+                    storage.mark_status(vacancy_id, "skip")
+        return redirect(url_for("vacancy_detail", vacancy_id=vacancy_id))
 
     return app

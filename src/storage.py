@@ -54,9 +54,10 @@ CREATE TABLE IF NOT EXISTS vacancies (
     -- префиксом "sj", чтобы не столкнуться с числовыми id hh.ru.
     source              TEXT DEFAULT 'hh',
     -- 'search' — обычный сбор по фильтрам (fetch); 'manual_url' — добавлена
-    -- через инструмент "вакансия по ссылке". manual_url НЕ попадает в три
-    -- основных списка (Разбор/Подходит/Архив), чтобы не путать сбор с
-    -- разовой проверкой чужой вакансии.
+    -- через инструмент "вакансия по ссылке". Чисто информационная метка —
+    -- ни на что не влияет: вакансия по ссылке проходит те же скоринг/
+    -- автоотсев/триаж, что и обычные, и попадает в те же три списка
+    -- (Разбор/Подходит/Архив), см. score_url_submit в webapp.py.
     origin              TEXT DEFAULT 'search',
     -- ключевые слова для HR/ATS-систем, которые выделила модель при скоринге
     -- (см. scorer.py) — JSON-список строк, показывается чипами на карточке
@@ -161,7 +162,8 @@ class Storage:
 
         `source`: 'hh' | 'superjob' — кто отдал данные (v уже нормализован под
         форму HH, см. superjob_client.normalize). `origin`: 'search' (обычный
-        fetch) | 'manual_url' (добавлена через инструмент "вакансия по ссылке")."""
+        fetch) | 'manual_url' (добавлена через инструмент "вакансия по ссылке") —
+        информационная метка, на скоринг/триаж/списки не влияет."""
         salary = v.get("salary") or {}
         employer = (v.get("employer") or {}).get("name")
         area = (v.get("area") or {}).get("name")
@@ -265,7 +267,7 @@ class Storage:
     ) -> tuple[str, list[Any]]:
         """Общий WHERE для list_scored/count_scored — держим условие в одном месте,
         чтобы счётчик страниц никогда не разъехался с самим списком."""
-        where = "WHERE score IS NOT NULL AND origin != 'manual_url'"
+        where = "WHERE score IS NOT NULL"
         params: list[Any] = []
         if status:
             where += " AND status = ?"
@@ -309,8 +311,8 @@ class Storage:
         точное значение (страницы «Подходит»/«Архив»).
 
         Вакансии с origin='manual_url' (добавлены через инструмент "вакансия
-        по ссылке") сюда никогда не попадают — это разовая проверка, не часть
-        очереди разбора.
+        по ссылке") участвуют в этих списках наравне с обычными — origin ни на
+        что не фильтруется, см. комментарий у колонки origin в SCHEMA.
 
         `hide_archived` — исключить вакансии, снятые с публикации у источника
         (см. `_scored_where`); используется страницей «Архив» по умолчанию.
@@ -349,7 +351,7 @@ class Storage:
         with self._conn() as conn:
             rows = conn.execute(
                 "SELECT decision, COUNT(*) AS cnt FROM vacancies "
-                "WHERE score IS NOT NULL AND origin != 'manual_url' GROUP BY decision"
+                "WHERE score IS NOT NULL GROUP BY decision"
             ).fetchall()
         counts = {"unsorted": 0, "fit": 0, "not_fit": 0}
         for r in rows:
