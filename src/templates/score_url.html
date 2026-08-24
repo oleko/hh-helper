@@ -20,4 +20,33 @@
   <br><br>
   <button type="submit">Оценить вакансию</button>
 </form>
+
+<h3 style="margin-top:2rem;">Что присылали по ссылке</h3>
+{% if not manual_url_vacancies %}
+<p style="color:#666;">Пока ничего не присылали через этот инструмент.</p>
+{% else %}
+<p style="color:#666; font-size:0.85rem;">Все вакансии, добавленные через этот инструмент, независимо от
+   того, куда их в итоге отсортировало решение (Разбор/Подходит/Архив) — просто история того, что сюда
+   присылали.</p>
+<table>
+  <thead>
+    <tr><th>Score</th><th>Вакансия</th><th>Рекомендация</th><th>Решение</th></tr>
+  </thead>
+  <tbody>
+  {% for v in manual_url_vacancies %}
+    <tr>
+      <td class="score">{{ v.score }}</td>
+      <td><a href="{{ url_for('vacancy_detail', vacancy_id=v.id) }}">{{ v.name }}</a><br>
+          <small>{{ v.employer or "—" }} · {{ v.source_label }}</small></td>
+      <td><span class="badge badge-{{ v.recommend }}">{{ v.recommend_label }}</span></td>
+      <td>
+        {% if v.decision == "fit" %}<span class="badge badge-fit">подходит</span>
+        {% elif v.decision == "not_fit" %}<span class="badge badge-not_fit">не подходит</span>
+        {% else %}<span style="color:#666;">в разборе</span>{% endif %}
+      </td>
+    </tr>
+  {% endfor %}
+  </tbody>
+</table>
+{% endif %}
 {% endblock %}

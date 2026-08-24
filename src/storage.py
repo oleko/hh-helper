@@ -359,6 +359,18 @@ class Storage:
             counts[key] = counts.get(key, 0) + r["cnt"]
         return counts
 
+    def list_by_origin(self, origin: str) -> list[sqlite3.Row]:
+        """Все вакансии с данным origin, в любом состоянии score/decision — для
+        списка "что присылали по ссылке" на /tool/score-url. Независим от
+        _scored_where: по своему decision такая вакансия и так попадает в
+        Разбор/Подходит/Архив наравне с обычными (см. комментарий у origin в
+        SCHEMA), а этот список — просто история, что через инструмент прошло,
+        безотносительно того, куда её отсортировали."""
+        with self._conn() as conn:
+            return conn.execute(
+                "SELECT * FROM vacancies WHERE origin = ? ORDER BY fetched_at DESC", (origin,)
+            ).fetchall()
+
     def record_token_usage(self, provider: str, task: str, usage: dict | None) -> None:
         """usage — LLMProvider.last_usage после provider.complete() (None, если
         вызов упал до получения ответа — тогда просто ничего не пишем)."""

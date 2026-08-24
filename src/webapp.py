@@ -1007,9 +1007,12 @@ def create_app(cfg: dict) -> Flask:
             return jsonify({"ok": True, "returned_to_unsorted": returned_to_unsorted})
         return redirect(url_for("vacancy_detail", vacancy_id=vacancy_id))
 
+    def _manual_url_vacancies() -> list[dict]:
+        return [_row_to_view(r, out_dir) for r in storage.list_by_origin("manual_url")]
+
     @app.get("/tool/score-url")
     def score_url_form():
-        return render_template("score_url.html", page="tool")
+        return render_template("score_url.html", page="tool", manual_url_vacancies=_manual_url_vacancies())
 
     @app.post("/tool/score-url")
     def score_url_submit():
@@ -1022,6 +1025,7 @@ def create_app(cfg: dict) -> Flask:
                 url=url,
                 error="Не распознал ссылку — нужна прямая ссылка на вакансию hh.ru "
                 "(hh.ru/vacancy/<id>) или superjob.ru (.../vakansii/...-<id>.html).",
+                manual_url_vacancies=_manual_url_vacancies(),
             )
         source, native = parsed
         vacancy_id = native if source == "hh" else sj_prefixed_id(native)
@@ -1031,6 +1035,7 @@ def create_app(cfg: dict) -> Flask:
             return render_template(
                 "score_url.html", page="tool", url=url,
                 error=f"Не удалось получить вакансию с {_SOURCE_LABELS.get(source, source)}: {e}",
+                manual_url_vacancies=_manual_url_vacancies(),
             )
         row = storage.get(vacancy_id)
         if row is None:
