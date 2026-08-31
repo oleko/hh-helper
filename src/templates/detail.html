@@ -7,7 +7,7 @@
   <h2 style="margin-bottom:0.3rem;">{{ v.name }}</h2>
   <p class="muted" style="font-size:0.95rem; margin-bottom:0.8rem;">{{ v.employer or "—" }}</p>
   <p style="display:flex; align-items:center; gap:0.5rem; flex-wrap:wrap; margin-bottom:0.5rem;">
-    <span class="score">Score: {{ v.score }}</span>
+    <span class="score"{% if v.score is not none %} style="--score-hue: {{ v.score * 1.2 }};"{% endif %}>Score: {{ v.score }}</span>
     <span class="muted">·</span>
     <span>Трек {{ v.track or "?" }}</span>
     <span class="muted">·</span>

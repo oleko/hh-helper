@@ -332,7 +332,7 @@ pollReassessStatus();
   <tbody>
   {% for v in vacancies %}
     <tr id="vac-row-{{ v.id }}">
-      <td class="score">{{ v.score }}</td>
+      <td class="score"{% if v.score is not none %} style="--score-hue: {{ v.score * 1.2 }};"{% endif %}>{{ v.score }}</td>
       <td><a href="{{ url_for('vacancy_detail', vacancy_id=v.id) }}">{{ v.name }}</a>
           {% if v.status == "new" %}<span class="chip">NEW</span>{% endif %}
           {% if v.metro_priority %}🚇{% endif %}{% if v.archived %}🗄{% endif %}

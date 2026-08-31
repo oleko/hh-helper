@@ -33,6 +33,9 @@
     --neutral-text: #52525b;
     --neutral-bg: #eef0f3;
 
+    --score-saturation: 72%;
+    --score-lightness: 38%;
+
     --radius-sm: 7px;
     --radius-md: 12px;
     --radius-full: 999px;
@@ -72,6 +75,9 @@
       --danger-bg: rgba(248, 113, 113, 0.14);
       --neutral-text: #b4b4c0;
       --neutral-bg: rgba(255, 255, 255, 0.06);
+
+      --score-saturation: 75%;
+      --score-lightness: 62%;
 
       --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.3);
       --shadow-md: 0 8px 24px rgba(0, 0, 0, 0.4);
@@ -177,7 +183,16 @@
   }
   tbody tr { transition: background-color 0.1s; }
   tbody tr:hover td { background: var(--surface-2); }
-  .score { font-weight: 700; font-family: var(--font-mono); }
+  /* red (0) -> yellow (~50) -> green (100): hue alone does the work (0deg to
+     120deg on the HSL wheel is exactly red-through-yellow-to-green), the
+     per-element --score-hue custom property is set inline from the actual
+     score value in the template. Saturation/lightness stay fixed per theme
+     (see :root / dark-mode block) so the ramp reads consistently everywhere
+     the score number appears, not just in the list tables. */
+  .score {
+    font-weight: 700; font-family: var(--font-mono);
+    color: hsl(var(--score-hue) var(--score-saturation) var(--score-lightness));
+  }
 
   /* data tables with a fixed column shape (list.html, score_url.html): column
      widths come from an explicit <colgroup> in the template, not guessed by

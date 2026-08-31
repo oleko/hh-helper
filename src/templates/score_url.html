@@ -42,7 +42,7 @@
   <tbody>
   {% for v in manual_url_vacancies %}
     <tr>
-      <td class="score">{{ v.score }}</td>
+      <td class="score"{% if v.score is not none %} style="--score-hue: {{ v.score * 1.2 }};"{% endif %}>{{ v.score }}</td>
       <td><a href="{{ url_for('vacancy_detail', vacancy_id=v.id) }}">{{ v.name }}</a><br>
           <small>{{ v.employer or "—" }} · {{ v.source_label }}</small></td>
       <td><span class="badge badge-{{ v.recommend }}">{{ v.recommend_label }}</span></td>
