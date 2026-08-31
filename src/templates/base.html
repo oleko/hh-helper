@@ -3,64 +3,269 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light dark">
 <title>{% block title %}hh-helper{% endblock %}</title>
 <style>
-  body { font-family: -apple-system, "Segoe UI", Roboto, sans-serif; max-width: 960px;
-         margin: 2rem auto; padding: 0 1rem; color: #1a1a1a; background: #fafafa; }
-  a { color: #0b5fff; text-decoration: none; }
+  /* ---------- design tokens ---------- */
+  :root {
+    --bg: #f6f6f8;
+    --surface: #ffffff;
+    --surface-2: #f0f1f3;
+    --border: #e4e4e8;
+    --border-strong: #d3d3d9;
+    --text: #18181b;
+    --text-muted: #6b6b76;
+    --text-faint: #9a9aa4;
+
+    --accent: #2f5fe0;
+    --accent-hover: #2450c2;
+    --accent-soft: #eaf0ff;
+    --accent-text-on: #ffffff;
+
+    --success: #16a34a;
+    --success-text: #166534;
+    --success-bg: #dcfce7;
+    --warning: #b45309;
+    --warning-bg: #fef3c7;
+    --danger: #dc2626;
+    --danger-text: #991b1b;
+    --danger-bg: #fee2e2;
+    --neutral-text: #52525b;
+    --neutral-bg: #eef0f3;
+
+    --radius-sm: 7px;
+    --radius-md: 12px;
+    --radius-full: 999px;
+
+    --shadow-sm: 0 1px 2px rgba(24, 24, 27, 0.05);
+    --shadow-md: 0 8px 24px rgba(24, 24, 27, 0.08);
+
+    --font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI Variable Text", "Segoe UI",
+                 ui-sans-serif, system-ui, Roboto, "Helvetica Neue", Arial, sans-serif;
+    --font-mono: ui-monospace, "Cascadia Code", "SF Mono", "Segoe UI Mono", Consolas,
+                 "Liberation Mono", monospace;
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #0c0c0e;
+      --surface: #17171a;
+      --surface-2: #202024;
+      --border: #2b2b30;
+      --border-strong: #3a3a41;
+      --text: #f2f2f4;
+      --text-muted: #a3a3ad;
+      --text-faint: #79798a;
+
+      --accent: #6b93ff;
+      --accent-hover: #89a9ff;
+      --accent-soft: rgba(107, 147, 255, 0.16);
+      --accent-text-on: #0c0c0e;
+
+      --success: #4ade80;
+      --success-text: #86efac;
+      --success-bg: rgba(74, 222, 128, 0.14);
+      --warning: #fbbf24;
+      --warning-bg: rgba(251, 191, 36, 0.14);
+      --danger: #f87171;
+      --danger-text: #fca5a5;
+      --danger-bg: rgba(248, 113, 113, 0.14);
+      --neutral-text: #b4b4c0;
+      --neutral-bg: rgba(255, 255, 255, 0.06);
+
+      --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.3);
+      --shadow-md: 0 8px 24px rgba(0, 0, 0, 0.4);
+    }
+  }
+
+  /* ---------- reset & base ---------- */
+  * { box-sizing: border-box; }
+  html { color-scheme: light dark; }
+  body {
+    font-family: var(--font-sans);
+    max-width: 1180px;
+    margin: 0 auto;
+    padding: 1.75rem 1.25rem 3rem;
+    color: var(--text);
+    background: var(--bg);
+    line-height: 1.5;
+    font-size: 15px;
+    -webkit-font-smoothing: antialiased;
+  }
+  h1, h2, h3, h4 { line-height: 1.25; font-weight: 650; letter-spacing: -0.01em; }
+  h2 { font-size: 1.4rem; margin: 0 0 0.9rem; }
+  h3 { font-size: 1.05rem; margin: 1.6rem 0 0.6rem; color: var(--text); }
+  h4 { font-size: 0.95rem; margin: 0 0 0.5rem; }
+  p { margin: 0 0 0.7rem; }
+  a { color: var(--accent); text-decoration: none; }
   a:hover { text-decoration: underline; }
-  table { border-collapse: collapse; width: 100%; }
-  th, td { text-align: left; padding: 0.5rem 0.6rem; border-bottom: 1px solid #ddd; vertical-align: top; }
-  th { font-size: 0.8rem; text-transform: uppercase; color: #666; }
-  .score { font-weight: 700; }
-  .flags { color: #b45309; font-size: 0.85rem; }
-  .badge { display: inline-block; padding: 0.1rem 0.5rem; border-radius: 999px; font-size: 0.8rem; }
-  .badge-respond { background: #dcfce7; color: #166534; }
-  .badge-consider { background: #fef9c3; color: #854d0e; }
-  .badge-skip { background: #f1f5f9; color: #64748b; }
-  form.inline { display: inline-block; margin-right: 0.4rem; }
-  button { cursor: pointer; border: 1px solid #ccc; background: #fff; border-radius: 6px;
-           padding: 0.35rem 0.8rem; font-size: 0.85rem; }
-  button:hover { background: #f1f5f9; }
-  .filters { margin-bottom: 1rem; }
-  .filters select, .filters input { padding: 0.3rem; }
-  pre.notes { white-space: pre-wrap; word-wrap: break-word; background: #fff;
-              border: 1px solid #e2e2e2; border-radius: 8px; padding: 1rem; }
-  .vacancy-description { background: #fff; border: 1px solid #e2e2e2; border-radius: 8px;
-                          padding: 1rem 1.2rem; line-height: 1.55; }
+  code {
+    font-family: var(--font-mono); font-size: 0.88em; background: var(--surface-2);
+    border: 1px solid var(--border); border-radius: 5px; padding: 0.05rem 0.35rem;
+  }
+  small { color: var(--text-muted); }
+  hr { border: none; border-top: 1px solid var(--border); margin: 1.25rem 0; }
+  ::selection { background: var(--accent-soft); }
+
+  :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 4px; }
+
+  /* ---------- top navigation ---------- */
+  .topnav {
+    display: flex; align-items: center; justify-content: space-between; gap: 1rem;
+    flex-wrap: wrap; margin: 0 0 1.75rem; padding-bottom: 1rem;
+    border-bottom: 1px solid var(--border);
+  }
+  .topnav h1 { margin: 0; font-size: 1.15rem; font-weight: 700; }
+  .topnav h1 a { color: var(--text); }
+  .topnav h1 a:hover { text-decoration: none; color: var(--accent); }
+  .topnav nav { display: flex; align-items: center; gap: 0.15rem; flex-wrap: wrap; }
+  .topnav nav a {
+    color: var(--text-muted); font-size: 0.88rem; font-weight: 550; padding: 0.4rem 0.7rem;
+    border-radius: var(--radius-full); transition: background-color 0.12s, color 0.12s;
+  }
+  .topnav nav a:hover { color: var(--text); background: var(--surface-2); text-decoration: none; }
+  .topnav nav a.active { color: var(--accent); background: var(--accent-soft); }
+  .topnav nav a.active:hover { background: var(--accent-soft); }
+  .topnav nav form { display: inline-flex; margin-left: 0.3rem; }
+  .topnav nav form button {
+    background: none; border: none; color: var(--text-muted); text-decoration: none;
+    cursor: pointer; padding: 0.4rem 0.7rem; font: inherit; font-size: 0.88rem; font-weight: 550;
+    border-radius: var(--radius-full);
+  }
+  .topnav nav form button:hover { color: var(--text); background: var(--surface-2); }
+
+  /* ---------- buttons ---------- */
+  button, .btn {
+    cursor: pointer; border: 1px solid var(--border-strong); background: var(--surface);
+    color: var(--text); border-radius: var(--radius-sm); padding: 0.45rem 0.85rem;
+    font-size: 0.86rem; font-weight: 550; font-family: inherit;
+    transition: background-color 0.12s, border-color 0.12s, transform 0.05s;
+  }
+  button:hover { background: var(--surface-2); border-color: var(--text-faint); }
+  button:active { transform: translateY(1px); }
+  button:disabled { opacity: 0.5; cursor: not-allowed; transform: none; }
+  button.btn-primary {
+    background: var(--accent); border-color: var(--accent); color: var(--accent-text-on);
+  }
+  button.btn-primary:hover { background: var(--accent-hover); border-color: var(--accent-hover); }
+  form.inline { display: inline-block; margin: 0 0.4rem 0.4rem 0; }
+
+  /* ---------- forms ---------- */
+  input[type="text"], input[type="url"], input[type="number"], input[type="password"],
+  input[type="email"], select, textarea {
+    font-family: inherit; font-size: 0.88rem; color: var(--text); background: var(--surface);
+    border: 1px solid var(--border-strong); border-radius: var(--radius-sm); padding: 0.45rem 0.6rem;
+    transition: border-color 0.12s, box-shadow 0.12s;
+  }
+  input:focus, select:focus, textarea:focus {
+    outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft);
+  }
+  input::placeholder, textarea::placeholder { color: var(--text-faint); }
+  label { font-weight: 550; font-size: 0.9rem; }
+  textarea { font-family: var(--font-mono); line-height: 1.5; }
+
+  /* ---------- tables ---------- */
+  table { border-collapse: collapse; width: 100%; font-size: 0.9rem; }
+  th, td { text-align: left; padding: 0.6rem 0.7rem; border-bottom: 1px solid var(--border); vertical-align: top; }
+  th {
+    font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.04em;
+    color: var(--text-muted); font-weight: 650; border-bottom-color: var(--border-strong);
+  }
+  tbody tr { transition: background-color 0.1s; }
+  tbody tr:hover td { background: var(--surface-2); }
+  .score { font-weight: 700; font-family: var(--font-mono); }
+  .decision-cell { display: flex; gap: 0.3rem; }
+  .decision-cell button { padding: 0.3rem 0.55rem; font-size: 0.95rem; line-height: 1; }
+
+  /* ---------- badges & chips ---------- */
+  .badge {
+    display: inline-block; padding: 0.15rem 0.6rem; border-radius: var(--radius-full);
+    font-size: 0.78rem; font-weight: 650;
+  }
+  .badge-respond { background: var(--success-bg); color: var(--success-text); }
+  .badge-consider { background: var(--warning-bg); color: var(--warning); }
+  .badge-skip { background: var(--neutral-bg); color: var(--neutral-text); }
+  .badge-fit { background: var(--success-bg); color: var(--success-text); }
+  .badge-not_fit { background: var(--danger-bg); color: var(--danger-text); }
+
+  .chip {
+    display: inline-block; padding: 0.18rem 0.6rem; border-radius: var(--radius-full);
+    font-size: 0.74rem; font-weight: 650; color: var(--accent-text-on); background: var(--accent);
+    margin: 0.15rem 0.3rem 0.15rem 0;
+  }
+  .chip-neutral { background: var(--neutral-bg); color: var(--neutral-text); }
+
+  /* ---------- surfaces / panels ---------- */
+  .chart-wrap {
+    overflow-x: auto; background: var(--surface); border: 1px solid var(--border);
+    border-radius: var(--radius-md); padding: 1.1rem 1.25rem; box-shadow: var(--shadow-sm);
+  }
+  pre.notes {
+    white-space: pre-wrap; word-wrap: break-word; background: var(--surface);
+    border: 1px solid var(--border); border-radius: var(--radius-md); padding: 1rem;
+    font-family: var(--font-mono); font-size: 0.85rem; line-height: 1.6;
+  }
+  .vacancy-description {
+    background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-md);
+    padding: 1.1rem 1.3rem; line-height: 1.6;
+  }
   .vacancy-description p, .vacancy-description ul, .vacancy-description ol { margin: 0.6rem 0; }
   .vacancy-description ul, .vacancy-description ol { padding-left: 1.4rem; }
-  .legend { margin-bottom: 1rem; background: #fff; border: 1px solid #e2e2e2; border-radius: 8px;
-            padding: 0.5rem 1rem; }
-  .legend summary { cursor: pointer; font-weight: 600; }
-  .legend ul { margin: 0.5rem 0 0.2rem; padding-left: 1.2rem; font-size: 0.9rem; }
-  .legend li { margin: 0.25rem 0; }
-  .topnav { display: flex; align-items: baseline; justify-content: space-between; gap: 1rem; flex-wrap: wrap; }
-  .topnav h1 { margin: 0; }
-  .topnav nav a { margin-left: 1rem; font-size: 0.9rem; }
-  .topnav nav a.active { font-weight: 700; text-decoration: underline; }
-  .chip { display: inline-block; padding: 0.15rem 0.55rem; border-radius: 999px;
-          font-size: 0.78rem; font-weight: 600; color: #fff; margin: 0.15rem 0.3rem 0.15rem 0; }
-  .badge-fit { background: #dcfce7; color: #166534; }
-  .badge-not_fit { background: #fee2e2; color: #991b1b; }
-  .chart-wrap { overflow-x: auto; background: #fff; border: 1px solid #e2e2e2;
-                border-radius: 8px; padding: 1rem; }
-  .switch { position: relative; display: inline-block; width: 42px; height: 23px; vertical-align: middle; }
+
+  .legend {
+    margin-bottom: 1.25rem; background: var(--surface); border: 1px solid var(--border);
+    border-radius: var(--radius-md); padding: 0.7rem 1.1rem;
+  }
+  .legend summary {
+    cursor: pointer; font-weight: 600; font-size: 0.9rem; color: var(--text-muted);
+    list-style: none;
+  }
+  .legend summary::-webkit-details-marker { display: none; }
+  .legend summary::before { content: "▸ "; color: var(--text-faint); }
+  .legend[open] summary::before { content: "▾ "; }
+  .legend ul { margin: 0.6rem 0 0.2rem; padding-left: 1.2rem; font-size: 0.88rem; }
+  .legend li { margin: 0.3rem 0; }
+
+  /* ---------- status / utility ---------- */
+  .flags { color: var(--warning); font-size: 0.85rem; }
+  .muted { color: var(--text-muted); font-size: 0.85rem; }
+  .text-success { color: var(--success-text); }
+  .filters { margin-bottom: 1rem; display: flex; flex-wrap: wrap; align-items: center; gap: 0.6rem 1rem; }
+  .filters label { display: flex; align-items: center; gap: 0.4rem; font-size: 0.88rem; }
+  .filters select, .filters input { padding: 0.4rem 0.55rem; }
+
+  .switch { position: relative; display: inline-block; width: 40px; height: 22px; vertical-align: middle; flex: none; }
   .switch input { opacity: 0; width: 0; height: 0; }
-  .switch .slider { position: absolute; inset: 0; cursor: pointer; background: #ccc;
-                     transition: 0.15s; border-radius: 999px; }
-  .switch .slider::before { position: absolute; content: ""; height: 17px; width: 17px;
-                             left: 3px; bottom: 3px; background: #fff; transition: 0.15s; border-radius: 50%; }
-  .switch input:checked + .slider { background: #0b5fff; }
-  .switch input:checked + .slider::before { transform: translateX(19px); }
-  .switch-row { display: flex; align-items: center; gap: 0.7rem; margin: 0.5rem 0; }
-  .status-dot { display: inline-block; width: 10px; height: 10px; border-radius: 50%;
-                margin-right: 0.4rem; vertical-align: middle; }
-  .status-unknown { background: #eab308; }
-  .status-ok { background: #22c55e; }
-  .status-fail { background: #ef4444; }
-  .progress-bar { background: #eee; border-radius: 999px; height: 10px; overflow: hidden; margin: 0.4rem 0; }
-  .progress-fill { background: #0b5fff; height: 100%; border-radius: 999px; transition: width 0.3s; }
+  .switch .slider {
+    position: absolute; inset: 0; cursor: pointer; background: var(--border-strong);
+    transition: 0.15s; border-radius: var(--radius-full);
+  }
+  .switch .slider::before {
+    position: absolute; content: ""; height: 16px; width: 16px; left: 3px; bottom: 3px;
+    background: var(--surface); transition: 0.15s; border-radius: 50%; box-shadow: var(--shadow-sm);
+  }
+  .switch input:checked + .slider { background: var(--accent); }
+  .switch input:checked + .slider::before { transform: translateX(18px); }
+  .switch-row { display: flex; align-items: center; gap: 0.7rem; margin: 0.55rem 0; font-size: 0.9rem; }
+
+  .status-dot {
+    display: inline-block; width: 9px; height: 9px; border-radius: 50%;
+    margin-right: 0.4rem; vertical-align: middle; flex: none;
+  }
+  .status-unknown { background: var(--text-faint); }
+  .status-ok { background: var(--success); }
+  .status-fail { background: var(--danger); }
+
+  .progress-bar { background: var(--surface-2); border-radius: var(--radius-full); height: 8px; overflow: hidden; margin: 0.5rem 0; }
+  .progress-fill { background: var(--accent); height: 100%; border-radius: var(--radius-full); transition: width 0.3s; }
+
+  footer { color: var(--text-faint); font-size: 0.78rem; }
+
+  @media (max-width: 640px) {
+    body { padding: 1.1rem 0.9rem 2.5rem; }
+    .topnav { flex-direction: column; align-items: flex-start; }
+    .topnav nav { gap: 0; margin-left: -0.7rem; }
+  }
 </style>
 </head>
 <body>
@@ -78,18 +283,16 @@
     <a href="{{ url_for('settings_page') }}" class="{{ 'active' if page == 'settings' }}"
        {% if update_available %}style="font-weight:800;" title="Доступна новая версия"{% endif %}>Настройки{% if update_available %} (!){% endif %}</a>
     <a href="{{ url_for('help_page') }}">Справка</a>
-    <form method="post" action="{{ url_for('logout') }}" style="display:inline; margin-left:1rem;">
-      <button type="submit" style="background:none; border:none; color:#0b5fff; text-decoration:underline;
-              cursor:pointer; padding:0; font:inherit;">Выйти</button>
+    <form method="post" action="{{ url_for('logout') }}">
+      <button type="submit">Выйти</button>
     </form>
   </nav>
 </div>
 {% endif %}
 {% block content %}{% endblock %}
 {% if page != 'login' and version %}
-<footer style="margin-top:2rem; padding-top:0.8rem; border-top:1px solid #ddd;
-               color:#999; font-size:0.8rem; text-align:center;">
-  hh-helper · сборка {{ version }}{% if update_available %} · <span style="color:#b45309;">доступно обновление</span>{% endif %}
+<footer style="margin-top:2.5rem; padding-top:1rem; border-top:1px solid var(--border); text-align:center;">
+  hh-helper · сборка {{ version }}{% if update_available %} · <span style="color:var(--warning);">доступно обновление</span>{% endif %}
 </footer>
 {% endif %}
 </body>

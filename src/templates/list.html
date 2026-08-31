@@ -8,15 +8,15 @@
 {% endif %}
 </h2>
 {% if page == "unsorted" %}
-<p style="color:#666;">Цель — довести этот список до нуля: у каждой вакансии должно быть
+<p class="muted" style="font-size:0.92rem;">Цель — довести этот список до нуля: у каждой вакансии должно быть
 решение 👍 или 👎. Разобранные уходят в «Подходит» или «Архив» и здесь больше не мозолят глаза.</p>
 {% endif %}
 
 {% if page == "liked" %}
 <div class="chart-wrap" style="margin-bottom:1rem;">
   <button type="button" id="check-actuality-btn" onclick="checkActuality()">🔄 Проверить актуальность</button>
-  <span id="check-actuality-msg"></span>
-  <p style="color:#666; font-size:0.85rem; margin:0.4rem 0 0;">
+  <span id="check-actuality-msg" class="muted"></span>
+  <p class="muted" style="margin:0.5rem 0 0;">
     Спрашивает у источника (hh.ru/SuperJob/Хабр), не сняты ли эти вакансии с
     публикации. Снятые уже не станут доступны повторно, поэтому автоматически
     переезжают в «Архив» вместо значка 🗄 на этой вкладке. То же самое, что
@@ -62,8 +62,8 @@ async function checkActuality() {
   {% elif show_archived %}
   <a href="{{ url_for('archive_page', min_score=min_score, sort=sort, search=search, show_archived=0) }}">Скрыть удалённые</a>
   {% endif %}
-  <div><span id="archive-check-actuality-msg"></span><span id="archive-reassess-msg"></span></div>
-  <p style="color:#666; font-size:0.85rem; margin:0.4rem 0 0;">
+  <div class="muted"><span id="archive-check-actuality-msg"></span><span id="archive-reassess-msg"></span></div>
+  <p class="muted" style="margin:0.5rem 0 0;">
     «Проверить актуальность» — быстро спрашивает у источника, не сняты ли вакансии
     с публикации (снятые по умолчанию скрыты из списка, ничего не удаляется).
     «Переоценить архив» — дорого: заново прогоняет живой архив через модель и
@@ -224,7 +224,7 @@ pollReassessStatus();
   <div class="progress-bar"><div class="progress-fill" id="pipeline-progress-fill"
        style="width: {{ (latest.done / latest.total * 100) if latest.total else 0 }}%;"></div></div>
   {% else %}
-  <p style="margin:0; color:#666; font-size:0.85rem;" id="pipeline-stage-text">
+  <p class="muted" style="margin:0;" id="pipeline-stage-text">
     Последний запуск: {{ (latest.finished_at or latest.started_at or '')[:16] | replace('T', ' ') }}
     {%- if fetch_run and fetch_run.message %} · {{ fetch_run.message }}{% endif %}
     {%- if score_run and score_run.message %} · {{ score_run.message }}{% endif %}
@@ -277,7 +277,7 @@ pollReassessStatus();
         Три раздела в шапке — «Разбор» (без решения), «Подходит» (👍),
         «Архив» (👎) — вакансия всегда ровно в одном из них. Кнопка ↩ возвращает
         в «Разбор», если передумал. Новые вакансии без решения помечены чипом
-        <span class="chip" style="background:#0b5fff;">NEW</span>.</li>
+        <span class="chip">NEW</span>.</li>
     <li>Статус: <code>new</code> → <code>digested</code> (попало в дайджест) →
         <code>skip</code> (= 👎 не подходит) → <code>applied</code> (откликнулся, = 👍 подходит)</li>
   </ul>
@@ -315,6 +315,7 @@ pollReassessStatus();
   <p>Архив пуст.</p>
   {% endif %}
 {% else %}
+<div class="chart-wrap" style="padding:0;">
 <table>
   <thead>
     <tr><th>Score</th><th>Вакансия</th><th>Трек</th><th>ЗП</th><th>Рекомендация</th><th>Флаги</th><th>Решение</th></tr>
@@ -324,7 +325,7 @@ pollReassessStatus();
     <tr id="vac-row-{{ v.id }}">
       <td class="score">{{ v.score }}</td>
       <td><a href="{{ url_for('vacancy_detail', vacancy_id=v.id) }}">{{ v.name }}</a>
-          {% if v.status == "new" %}<span class="chip" style="background:#0b5fff;">NEW</span>{% endif %}
+          {% if v.status == "new" %}<span class="chip">NEW</span>{% endif %}
           {% if v.metro_priority %}🚇{% endif %}{% if v.archived %}🗄{% endif %}
           {% if v.has_tailor %}<span title="Резюме и письмо уже подготовлены">📝</span>{% endif %}<br>
           <small>{{ v.employer or "—" }}{% if v.metro_station %} · {{ v.metro_station }}{% endif %}
@@ -346,6 +347,7 @@ pollReassessStatus();
   {% endfor %}
   </tbody>
 </table>
+</div>
 <script>
 // Решения на списке — по AJAX, без перезагрузки: убираем строку (на любой из
 // трёх страниц активные кнопки всегда уводят вакансию из текущего списка) и
@@ -383,7 +385,7 @@ function updateNavCounts(c) {
   {% if page_num > 1 %}
   <a href="{{ url_for(request.endpoint, status=status, min_score=min_score, sort=sort, search=search, show_archived=(1 if show_archived else none), page=page_num-1) }}">« Назад</a>
   {% endif %}
-  <span style="color:#666; font-size:0.85rem;">Страница {{ page_num }} из {{ total_pages }} ({{ total }} вакансий)</span>
+  <span class="muted">Страница {{ page_num }} из {{ total_pages }} ({{ total }} вакансий)</span>
   {% if page_num < total_pages %}
   <a href="{{ url_for(request.endpoint, status=status, min_score=min_score, sort=sort, search=search, show_archived=(1 if show_archived else none), page=page_num+1) }}">Вперёд »</a>
   {% endif %}

@@ -2,7 +2,7 @@
 {% block title %}Вакансия по ссылке — hh-helper{% endblock %}
 {% block content %}
 <h2>Вакансия по ссылке</h2>
-<p style="color:#666;">Вставь прямую ссылку на вакансию с hh.ru или superjob.ru — не входящую в
+<p class="muted" style="font-size:0.92rem;">Вставь прямую ссылку на вакансию с hh.ru или superjob.ru — не входящую в
 твой обычный поиск (например, кто-то прислал напрямую). Инструмент сразу оценит её — точно так же,
 как вакансии из основного сбора: минус-слова и автоотсев по порогу работают так же, и она попадёт
 в «Разбор», «Подходит» или «Архив» наравне с остальными. Резюме и сопроводительное письмо не
@@ -14,20 +14,21 @@
 {% endif %}
 
 <form method="post" action="{{ url_for('score_url_submit') }}"
-      onsubmit="this.querySelector('button').disabled=true; this.querySelector('button').textContent='⏳ Оцениваю… (10–20 сек)';">
+      onsubmit="this.querySelector('button').disabled=true; this.querySelector('button').textContent='⏳ Оцениваю… (10–20 сек)';"
+      style="display:flex; gap:0.6rem; margin-bottom:1.5rem;">
   <input type="url" name="url" placeholder="https://hh.ru/vacancy/... или https://www.superjob.ru/vakansii/...html"
-         value="{{ url or '' }}" style="width:100%; max-width:40rem; padding:0.5rem; box-sizing:border-box;" required>
-  <br><br>
-  <button type="submit">Оценить вакансию</button>
+         value="{{ url or '' }}" style="flex:1; max-width:40rem;" required>
+  <button type="submit" class="btn-primary">Оценить вакансию</button>
 </form>
 
-<h3 style="margin-top:2rem;">Что присылали по ссылке</h3>
+<h3>Что присылали по ссылке</h3>
 {% if not manual_url_vacancies %}
-<p style="color:#666;">Пока ничего не присылали через этот инструмент.</p>
+<p class="muted">Пока ничего не присылали через этот инструмент.</p>
 {% else %}
-<p style="color:#666; font-size:0.85rem;">Все вакансии, добавленные через этот инструмент, независимо от
+<p class="muted" style="margin-bottom:0.8rem;">Все вакансии, добавленные через этот инструмент, независимо от
    того, куда их в итоге отсортировало решение (Разбор/Подходит/Архив) — просто история того, что сюда
    присылали.</p>
+<div class="chart-wrap" style="padding:0;">
 <table>
   <thead>
     <tr><th>Score</th><th>Вакансия</th><th>Рекомендация</th><th>Решение</th></tr>
@@ -42,11 +43,12 @@
       <td>
         {% if v.decision == "fit" %}<span class="badge badge-fit">подходит</span>
         {% elif v.decision == "not_fit" %}<span class="badge badge-not_fit">не подходит</span>
-        {% else %}<span style="color:#666;">в разборе</span>{% endif %}
+        {% else %}<span class="muted">в разборе</span>{% endif %}
       </td>
     </tr>
   {% endfor %}
   </tbody>
 </table>
+</div>
 {% endif %}
 {% endblock %}

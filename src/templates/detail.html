@@ -2,68 +2,75 @@
 {% block title %}{{ v.name }} — hh-helper{% endblock %}
 {% block content %}
 <p><a href="{{ url_for('index') }}">&larr; ко всем вакансиям</a></p>
-<h2>{{ v.name }} <small>— {{ v.employer or "—" }}</small></h2>
-<p>
-  <span class="score">Score: {{ v.score }}</span> ·
-  Трек {{ v.track or "?" }} ·
-  ЗП {{ v.salary_fit or "не указана" }} ·
-  <span class="badge badge-{{ v.recommend }}">{{ v.recommend_label }}</span> ·
-  статус: <b>{{ v.status }}</b> ·
-  <span class="chip" style="background:#555;">{{ v.source_label }}</span>
-  {% if v.decision == "fit" %}· <span class="badge badge-fit">подходит</span>{% endif %}
-  {% if v.decision == "not_fit" %}· <span class="badge badge-not_fit">не подходит</span>{% endif %}
-</p>
-{% if v.decision_reason %}
-<p style="color:#666; font-size:0.9rem;"><em>Причина: {{ v.decision_reason }}</em></p>
-{% endif %}
-{% if v.metro_station %}
-<p>🚇 {{ v.metro_station }}{% if v.metro_line %} ({{ v.metro_line }}){% endif %}
-   {% if v.metro_priority %}<strong>— приоритетная линия</strong>{% endif %}</p>
-{% endif %}
-{% if v.archived %}
-<p class="flags">🗄 по данным {{ v.source_label }} вакансия в архиве/снята с публикации
-   {% if v.archive_checked_at %}(проверено {{ v.archive_checked_at[:16] | replace("T", " ") }}){% endif %}</p>
-{% elif v.archive_checked_at %}
-<p style="color:#166534;">✓ актуальна на {{ v.source_label }} (проверено {{ v.archive_checked_at[:16] | replace("T", " ") }})</p>
-{% endif %}
-{% if v.red_flags %}
-<p class="flags">⚠ {{ v.red_flags | join(", ") }}</p>
-{% endif %}
-<p>{{ v.rationale }}</p>
-{% if v.ats_keywords %}
-<p>
-  <span style="color:#666; font-size:0.85rem;">Ключевые слова для HR/ATS:</span><br>
-  {% for kw in v.ats_keywords %}<span class="chip" style="background:#0b5fff;">{{ kw }}</span>{% endfor %}
-</p>
-{% endif %}
-<p><a href="{{ v.url }}" target="_blank" rel="noopener">Открыть на {{ v.source_label }} →</a></p>
 
-<form class="inline" method="post" action="{{ url_for('vacancy_status', vacancy_id=v.id) }}">
-  <input type="hidden" name="status" value="applied">
-  <button type="submit">Откликнулся</button>
-</form>
-<form class="inline" method="post" action="{{ url_for('vacancy_check', vacancy_id=v.id) }}">
-  <button type="submit">Проверить актуальность</button>
-</form>
-<form class="inline" method="post" action="{{ url_for('vacancy_reassess', vacancy_id=v.id) }}"
-      onsubmit="this.querySelector('button').disabled=true; this.querySelector('button').textContent='⏳ Переоцениваю…';">
-  <button type="submit" title="Заново прогнать через модель прямо сейчас">🔁 Переоценить</button>
-</form>
-<br><br>
-<form method="post" action="{{ url_for('vacancy_decide', vacancy_id=v.id) }}">
-  <input type="text" name="reason" placeholder="Почему? (необязательно)"
-         value="{{ v.decision_reason or '' }}" style="width:22rem; max-width:100%; padding:0.35rem;">
-  <br><br>
-  {% if v.decision != "fit" %}
-  <button type="submit" name="decision" value="fit">👍 Подходит</button>
+<div class="chart-wrap" style="margin-bottom:1.25rem;">
+  <h2 style="margin-bottom:0.3rem;">{{ v.name }}</h2>
+  <p class="muted" style="font-size:0.95rem; margin-bottom:0.8rem;">{{ v.employer or "—" }}</p>
+  <p style="display:flex; align-items:center; gap:0.5rem; flex-wrap:wrap; margin-bottom:0.5rem;">
+    <span class="score">Score: {{ v.score }}</span>
+    <span class="muted">·</span>
+    <span>Трек {{ v.track or "?" }}</span>
+    <span class="muted">·</span>
+    <span>ЗП {{ v.salary_fit or "не указана" }}</span>
+    <span class="badge badge-{{ v.recommend }}">{{ v.recommend_label }}</span>
+    <span class="chip chip-neutral">статус: {{ v.status }}</span>
+    <span class="chip chip-neutral">{{ v.source_label }}</span>
+    {% if v.decision == "fit" %}<span class="badge badge-fit">подходит</span>{% endif %}
+    {% if v.decision == "not_fit" %}<span class="badge badge-not_fit">не подходит</span>{% endif %}
+  </p>
+  {% if v.decision_reason %}
+  <p class="muted" style="font-size:0.88rem;"><em>Причина: {{ v.decision_reason }}</em></p>
   {% endif %}
-  {% if v.decision != "not_fit" %}
-  <button type="submit" name="decision" value="not_fit">👎 Не подходит (в архив)</button>
+  {% if v.metro_station %}
+  <p>🚇 {{ v.metro_station }}{% if v.metro_line %} ({{ v.metro_line }}){% endif %}
+     {% if v.metro_priority %}<strong>— приоритетная линия</strong>{% endif %}</p>
   {% endif %}
-  {% if v.decision %}
-  <button type="submit" name="decision" value="clear">Сбросить решение</button>
+  {% if v.archived %}
+  <p class="flags">🗄 по данным {{ v.source_label }} вакансия в архиве/снята с публикации
+     {% if v.archive_checked_at %}(проверено {{ v.archive_checked_at[:16] | replace("T", " ") }}){% endif %}</p>
+  {% elif v.archive_checked_at %}
+  <p class="text-success">✓ актуальна на {{ v.source_label }} (проверено {{ v.archive_checked_at[:16] | replace("T", " ") }})</p>
   {% endif %}
-</form>
+  {% if v.red_flags %}
+  <p class="flags">⚠ {{ v.red_flags | join(", ") }}</p>
+  {% endif %}
+  <p>{{ v.rationale }}</p>
+  {% if v.ats_keywords %}
+  <p style="margin-bottom:0;">
+    <span class="muted">Ключевые слова для HR/ATS:</span><br>
+    {% for kw in v.ats_keywords %}<span class="chip">{{ kw }}</span>{% endfor %}
+  </p>
+  {% endif %}
+  <p style="margin-top:0.8rem; margin-bottom:0;"><a href="{{ v.url }}" target="_blank" rel="noopener">Открыть на {{ v.source_label }} →</a></p>
+</div>
+
+<div style="margin-bottom:1.25rem;">
+  <form class="inline" method="post" action="{{ url_for('vacancy_status', vacancy_id=v.id) }}">
+    <input type="hidden" name="status" value="applied">
+    <button type="submit">Откликнулся</button>
+  </form>
+  <form class="inline" method="post" action="{{ url_for('vacancy_check', vacancy_id=v.id) }}">
+    <button type="submit">Проверить актуальность</button>
+  </form>
+  <form class="inline" method="post" action="{{ url_for('vacancy_reassess', vacancy_id=v.id) }}"
+        onsubmit="this.querySelector('button').disabled=true; this.querySelector('button').textContent='⏳ Переоцениваю…';">
+    <button type="submit" title="Заново прогнать через модель прямо сейчас">🔁 Переоценить</button>
+  </form>
+
+  <form method="post" action="{{ url_for('vacancy_decide', vacancy_id=v.id) }}" style="margin-top:0.7rem;">
+    <input type="text" name="reason" placeholder="Почему? (необязательно)"
+           value="{{ v.decision_reason or '' }}" style="width:22rem; max-width:100%; margin-bottom:0.6rem; display:block;">
+    {% if v.decision != "fit" %}
+    <button type="submit" name="decision" value="fit" class="btn-primary">👍 Подходит</button>
+    {% endif %}
+    {% if v.decision != "not_fit" %}
+    <button type="submit" name="decision" value="not_fit">👎 Не подходит (в архив)</button>
+    {% endif %}
+    {% if v.decision %}
+    <button type="submit" name="decision" value="clear">Сбросить решение</button>
+    {% endif %}
+  </form>
+</div>
 
 <h3>Резюме и письмо</h3>
 {% if docx_warning %}
@@ -89,7 +96,7 @@
 {% else %}
 <form method="post" action="{{ url_for('vacancy_tailor', vacancy_id=v.id) }}"
       onsubmit="this.querySelector('button').disabled=true; this.querySelector('button').textContent='⏳ Генерирую… (20–40 сек)';">
-  <button type="submit">Подготовить резюме и письмо</button>
+  <button type="submit" class="btn-primary">Подготовить резюме и письмо</button>
 </form>
 {% endif %}
 

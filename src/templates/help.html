@@ -82,10 +82,10 @@ superjob.ru, инструмент сам получает карточку, оц
 настраивается на странице «Настройки» (раздел «Поиск»), это твои текущие линии:</p>
 {% if metro_lines %}
 <p>
-  {% for line in metro_lines %}<span class="chip" style="background:#0b5fff;">{{ line }}</span>{% endfor %}
+  {% for line in metro_lines %}<span class="chip">{{ line }}</span>{% endfor %}
 </p>
 {% else %}
-<p style="color:#666;">Список пуст — метро сейчас не влияет на score. Добавь линии
+<p class="muted">Список пуст — метро сейчас не влияет на score. Добавь линии
 на странице «Настройки».</p>
 {% endif %}
 

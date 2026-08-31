@@ -4,7 +4,7 @@
 <h2>Настройки</h2>
 
 {% if update_available %}
-<div class="chart-wrap" style="border-color:#eab308; background:#fefce8; margin-bottom:1rem;">
+<div class="chart-wrap" style="border-color:var(--warning); background:var(--warning-bg); margin-bottom:1rem;">
   🔔 <strong>Доступна новая версия</strong> (сборка {{ update_remote }}, у тебя {{ update_local }}).
   Обнови из репозитория: <code>git pull</code> (или залей обновлённые файлы) и перезапусти сервис —
   <code>systemctl restart hh-helper-web</code>.
@@ -35,7 +35,7 @@
       {% if run_in_progress %}Прогон уже выполняется — см. прогресс на главной странице.{% endif %}
     </span>
   </div>
-  <p style="color:#666; font-size:0.85rem; margin:0.4rem 0 0;">
+  <p class="muted" style="margin:0.4rem 0 0;">
     Запускает <code>fetch → score → digest</code> прямо сейчас, не дожидаясь cron —
     тот же самый процесс, в фоне, прогресс виден на главной странице.
   </p>
@@ -79,7 +79,7 @@
     </form>
     <span>Хабр Карьера — {{ "включён" if source_habr_enabled else "выключен" }}</span>
   </div>
-  <p style="color:#666; font-size:0.85rem; margin:0.4rem 0 0;">
+  <p class="muted" style="margin:0.4rem 0 0;">
     Хабр Карьера ориентирован на IT — по умолчанию выключен, чтобы не заливать
     очередь разбора; включи, если ищешь роли в диджитале/продукте.
   </p>
@@ -101,7 +101,7 @@
     <br>
     <button type="button" onclick="generateSearchQueries(this)">🤖 Предложить через ИИ</button>
     <span id="search-queries-status"></span>
-    <p style="color:#666; font-size:0.85rem; margin:0.3rem 0 0;">
+    <p class="muted" style="margin:0.3rem 0 0;">
       Черновик по карьерной базе (та же модель, что пишет резюме/письма) — только
       подставляется в поле выше, ничего не сохраняет само. Проверь/поправь и жми «Сохранить».</p>
     <br><br>
@@ -115,7 +115,7 @@
     <br><br>
     <details>
       <summary>Другой город (нет в списке — введи id вручную)</summary>
-      <p style="color:#666; font-size:0.85rem; margin:0.4rem 0;">
+      <p class="muted" style="margin:0.4rem 0;">
         Если заполнишь «HH area id» — он победит выбор из списка выше.
         Найти id города: <a href="{{ url_for('areas_lookup') }}">поиск по названию</a>.</p>
       <label>HH area id: <input type="number" name="custom_area" style="width:6rem; padding:0.3rem;"></label>
@@ -132,7 +132,7 @@
       <input type="checkbox" name="include_no_salary" {{ "checked" if include_no_salary }}>
       Учитывать вакансии без указания зарплаты
     </label>
-    <p style="color:#666; font-size:0.85rem; margin:0.2rem 0 0;">
+    <p class="muted" style="margin:0.2rem 0 0;">
       У сеньорных ролей зарплату часто не публикуют. Если галочка снята — такие
       вакансии в выдачу не попадут (на hh.ru; SuperJob фильтрует зарплату жёстко в любом случае).</p>
     <br>
@@ -148,12 +148,12 @@
                 font-family:monospace; font-size:0.85rem; padding:0.5rem; box-sizing:border-box;"
                 >{{ stop_words_text }}</textarea>
     </label>
-    <p style="color:#666; font-size:0.85rem; margin:0.3rem 0 0;">
+    <p class="muted" style="margin:0.3rem 0 0;">
       Вакансии, где в названии или описании встречается любое из этих слов, сразу
       уходят в Архив без оценки — экономит токены на заведомо ненужном. Пусто —
       фильтр выключен.</p>
     <br>
-    <p style="color:#666; font-size:0.85rem; margin:0 0 0.3rem;">Ничего не отмечено в категории —
+    <p class="muted" style="margin:0 0 0.3rem;">Ничего не отмечено в категории —
        фильтр по ней не применяется (ищем без ограничения). На SuperJob из каждой
        категории учитывается только первый отмеченный пункт — там нет мультивыбора.</p>
     <div style="display:flex; gap:2rem; flex-wrap:wrap;">
@@ -186,7 +186,7 @@
       </div>
     </div>
     <br>
-    <button type="submit">Сохранить</button>
+    <button type="submit" class="btn-primary">Сохранить</button>
   </form>
 </div>
 
@@ -198,7 +198,7 @@
   <form method="post" action="{{ url_for('settings_auto_reject') }}">
     <input type="number" name="auto_reject_max_score" min="0" max="100" value="{{ auto_reject_max_score }}"
            style="width:5rem; padding:0.35rem;">
-    <button type="submit">Сохранить</button>
+    <button type="submit" class="btn-primary">Сохранить</button>
   </form>
 </div>
 
@@ -209,7 +209,7 @@
   <form method="post" action="{{ url_for('settings_backup_keep') }}">
     <input type="number" name="backup_keep_count" min="1" value="{{ backup_keep_count }}"
            style="width:5rem; padding:0.35rem;">
-    <button type="submit">Сохранить</button>
+    <button type="submit" class="btn-primary">Сохранить</button>
   </form>
 </div>
 
@@ -227,7 +227,7 @@
         <option value="{{ v }}" {{ "selected" if v == score_choice }}>{{ m.label }}</option>
         {% endfor %}
       </select>
-      <br><small id="models-status-score" style="color:#666;"></small>
+      <br><small id="models-status-score" class="muted"></small>
     </label>
     <br><br>
     <label>Резюме и письма:
@@ -237,10 +237,10 @@
         <option value="{{ v }}" {{ "selected" if v == tailor_choice }}>{{ m.label }}</option>
         {% endfor %}
       </select>
-      <br><small id="models-status-tailor" style="color:#666;"></small>
+      <br><small id="models-status-tailor" class="muted"></small>
     </label>
     <br><br>
-    <button type="submit">Сохранить</button>
+    <button type="submit" class="btn-primary">Сохранить</button>
     <button type="button" onclick="refreshModelsButton(this)">🔄 Обновить списки моделей</button>
   </form>
 
@@ -473,16 +473,17 @@ document.addEventListener("DOMContentLoaded", () => {
     <textarea name="career_base" rows="24" style="width:100%; font-family:monospace;
               font-size:0.85rem; padding:0.6rem; box-sizing:border-box;">{{ career_base }}</textarea>
     <br><br>
-    <button type="submit">Сохранить карьерную базу</button>
+    <button type="submit" class="btn-primary">Сохранить карьерную базу</button>
   </form>
-  <hr style="margin:1rem 0; border:none; border-top:1px solid #ddd;">
+  <hr>
   <button type="button" id="career-advice-btn" onclick="generateCareerAdvice(this)">💡 Совет по правке базы</button>
-  <span id="career-advice-status"></span>
-  <p style="color:#666; font-size:0.85rem; margin:0.4rem 0 0;">
+  <span id="career-advice-status" class="muted"></span>
+  <p class="muted" style="margin:0.4rem 0 0;">
     Смотрит на все вакансии «Подходит» (та же тяжёлая модель, что пишет резюме/письма) и
     предлагает, что изменить в базе для более релевантных вакансий и резюме. Только показывает
     совет — сам ничего в базе не правит, вносить правки в текстовое поле выше нужно вручную.</p>
-  <div id="career-advice-panel" style="display:none; margin-top:0.6rem; padding:0.8rem;
-       background:#f8f9fa; border-radius:4px; white-space:pre-wrap; font-size:0.9rem;"></div>
+  <div id="career-advice-panel" style="display:none; margin-top:0.7rem; padding:0.9rem 1rem;
+       background:var(--surface-2); border:1px solid var(--border); border-radius:var(--radius-md);
+       white-space:pre-wrap; font-size:0.88rem; line-height:1.55;"></div>
 </div>
 {% endblock %}

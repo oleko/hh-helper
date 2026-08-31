@@ -2,19 +2,19 @@
 {% block title %}Поиск id города — hh-helper{% endblock %}
 {% block content %}
 <h2>Поиск id города</h2>
-<p style="color:#666;">Для города, которого нет в списке на странице «Настройки» →
+<p class="muted" style="font-size:0.92rem;">Для города, которого нет в списке на странице «Настройки» →
 «Поиск»: найди его здесь по названию и скопируй числовой id в поле «свой id»
 (отдельно для hh.ru и для SuperJob — это разные справочники, id обычно не совпадают).</p>
 
-<form method="get" action="{{ url_for('areas_lookup') }}">
+<form method="get" action="{{ url_for('areas_lookup') }}" style="display:flex; gap:0.5rem; margin-bottom:1.25rem;">
   <input type="text" name="q" value="{{ q }}" placeholder="Например: Тверь"
-         style="width:20rem; max-width:100%; padding:0.5rem;" autofocus>
-  <button type="submit">Найти</button>
+         style="width:20rem; max-width:100%;" autofocus>
+  <button type="submit" class="btn-primary">Найти</button>
 </form>
 
 {% if q %}
-<div class="chart-wrap" style="margin-top:1rem; display:flex; gap:2rem; flex-wrap:wrap;">
-  <div style="min-width:16rem;">
+<div style="display:flex; gap:1.25rem; flex-wrap:wrap;">
+  <div class="chart-wrap" style="flex:1; min-width:16rem;">
     <h4 style="margin-top:0;">hh.ru</h4>
     {% if hh_results %}
     <table>
@@ -26,13 +26,13 @@
       </tbody>
     </table>
     {% if hh_results|length == 40 %}
-    <p style="color:#666; font-size:0.85rem;">Показаны первые 40 — уточни запрос, если нужного нет в списке.</p>
+    <p class="muted">Показаны первые 40 — уточни запрос, если нужного нет в списке.</p>
     {% endif %}
     {% else %}
-    <p style="color:#666;">Ничего не нашлось.</p>
+    <p class="muted">Ничего не нашлось.</p>
     {% endif %}
   </div>
-  <div style="min-width:16rem;">
+  <div class="chart-wrap" style="flex:1; min-width:16rem;">
     <h4 style="margin-top:0;">SuperJob</h4>
     {% if sj_results %}
     <table>
@@ -44,10 +44,10 @@
       </tbody>
     </table>
     {% if sj_results|length == 40 %}
-    <p style="color:#666; font-size:0.85rem;">Показаны первые 40 — уточни запрос, если нужного нет в списке.</p>
+    <p class="muted">Показаны первые 40 — уточни запрос, если нужного нет в списке.</p>
     {% endif %}
     {% else %}
-    <p style="color:#666;">Ничего не нашлось (или источник SuperJob выключен/не настроен).</p>
+    <p class="muted">Ничего не нашлось (или источник SuperJob выключен/не настроен).</p>
     {% endif %}
   </div>
 </div>
