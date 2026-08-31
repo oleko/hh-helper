@@ -17,7 +17,8 @@
   <div class="chart-wrap" style="flex:1; min-width:16rem;">
     <h4 style="margin-top:0;">hh.ru</h4>
     {% if hh_results %}
-    <table>
+    <table class="table-fixed">
+      <colgroup><col style="width:22%"><col style="width:78%"></colgroup>
       <thead><tr><th>id</th><th>Название</th></tr></thead>
       <tbody>
       {% for a in hh_results %}
@@ -35,7 +36,8 @@
   <div class="chart-wrap" style="flex:1; min-width:16rem;">
     <h4 style="margin-top:0;">SuperJob</h4>
     {% if sj_results %}
-    <table>
+    <table class="table-fixed">
+      <colgroup><col style="width:22%"><col style="width:78%"></colgroup>
       <thead><tr><th>id</th><th>Название</th></tr></thead>
       <tbody>
       {% for t in sj_results %}

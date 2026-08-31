@@ -18,7 +18,8 @@
 
 <h2>Что происходит само, без тебя</h2>
 <p>На сервере в cron стоят три шага подряд каждое утро — ничего нажимать не нужно:</p>
-<table>
+<table class="table-fixed">
+  <colgroup><col style="width:12%"><col style="width:20%"><col style="width:68%"></colgroup>
   <thead><tr><th>Время</th><th>Команда</th><th>Что делает</th></tr></thead>
   <tbody>
     <tr><td>09:00</td><td><code>fetch</code></td>
@@ -151,7 +152,8 @@ superjob.ru, инструмент сам получает карточку, оц
 
 <h2>Кнопка «Подготовить резюме и письмо»</h2>
 <p>На карточке вакансии генерирует три файла разом (через YandexGPT, 20–40 секунд):</p>
-<table>
+<table class="table-fixed">
+  <colgroup><col style="width:24%"><col style="width:76%"></colgroup>
   <thead><tr><th>Файл</th><th>Что внутри</th></tr></thead>
   <tbody>
     <tr><td><code>resume_notes.md</code></td>
@@ -291,7 +293,8 @@ GigaChat и OpenAI-совместимый — опциональные, у ка�
 .venv/bin/python -m src.main dictionaries       # выгрузить справочники HH</pre>
 
 <h2>Где что физически лежит</h2>
-<table>
+<table class="table-fixed">
+  <colgroup><col style="width:28%"><col style="width:72%"></colgroup>
   <thead><tr><th>Что</th><th>Где</th></tr></thead>
   <tbody>
     <tr><td>Сервер</td><td>&lt;IP твоего сервера&gt; (Ubuntu, VPS)</td></tr>

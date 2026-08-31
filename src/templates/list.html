@@ -58,9 +58,9 @@ async function checkActuality() {
   <button type="button" id="archive-reassess-btn" onclick="archiveReassess()">♻️ Переоценить архив</button>
   <button type="button" id="archive-reassess-stop-btn" onclick="archiveReassessStop()" style="display:none;">⏹ Остановить переоценку</button>
   {% if hidden_archived_count is not none %}
-  <a href="{{ url_for('archive_page', min_score=min_score, sort=sort, search=search, show_archived=1) }}">Показать скрытые ({{ hidden_archived_count }})</a>
+  <a class="btn" href="{{ url_for('archive_page', min_score=min_score, sort=sort, search=search, show_archived=1) }}">Показать скрытые ({{ hidden_archived_count }})</a>
   {% elif show_archived %}
-  <a href="{{ url_for('archive_page', min_score=min_score, sort=sort, search=search, show_archived=0) }}">Скрыть удалённые</a>
+  <a class="btn" href="{{ url_for('archive_page', min_score=min_score, sort=sort, search=search, show_archived=0) }}">Скрыть удалённые</a>
   {% endif %}
   <div class="muted"><span id="archive-check-actuality-msg"></span><span id="archive-reassess-msg"></span></div>
   <p class="muted" style="margin:0.5rem 0 0;">
@@ -316,7 +316,16 @@ pollReassessStatus();
   {% endif %}
 {% else %}
 <div class="chart-wrap flush">
-<table class="table-vacancies">
+<table class="table-fixed">
+  <colgroup>
+    <col style="width:7%">
+    <col style="width:31%">
+    <col style="width:6%">
+    <col style="width:12%">
+    <col style="width:13%">
+    <col style="width:17%">
+    <col style="width:14%">
+  </colgroup>
   <thead>
     <tr><th>Score</th><th>Вакансия</th><th>Трек</th><th>ЗП</th><th>Рекомендация</th><th>Флаги</th><th>Решение</th></tr>
   </thead>

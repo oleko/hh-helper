@@ -141,10 +141,14 @@
     font-size: 0.86rem; font-weight: 550; font-family: inherit;
     transition: background-color 0.12s, border-color 0.12s, transform 0.05s;
   }
-  button:hover { background: var(--surface-2); border-color: var(--text-faint); }
-  button:active { transform: translateY(1px); }
+  /* .btn on an <a> - e.g. "Показать скрытые" - needs its own box (inline
+     elements ignore vertical padding for line-height purposes otherwise)
+     and must not pick up the global link underline-on-hover */
+  a.btn, a.btn:hover { display: inline-block; text-decoration: none; }
+  button:hover, .btn:hover { background: var(--surface-2); border-color: var(--text-faint); }
+  button:active, .btn:active { transform: translateY(1px); }
   button:disabled { opacity: 0.5; cursor: not-allowed; transform: none; }
-  button.btn-primary {
+  button.btn-primary, a.btn-primary {
     background: var(--accent); border-color: var(--accent); color: var(--accent-text-on);
   }
   button.btn-primary:hover { background: var(--accent-hover); border-color: var(--accent-hover); }
@@ -175,20 +179,26 @@
   tbody tr:hover td { background: var(--surface-2); }
   .score { font-weight: 700; font-family: var(--font-mono); }
 
-  /* vacancy tables (list.html, score_url.html): every column shrinks to its
-     content (nowrap) except the vacancy name/employer column, which is the
-     only one meant to flex and absorb the row's leftover width. Without this,
-     auto table layout hands surplus width to whichever column has no content
-     to size against (usually the empty "Флаги" column), leaving a huge dead
-     gap before the decision buttons instead of a tight, aligned table. */
-  .table-vacancies td, .table-vacancies th { white-space: nowrap; width: 1%; }
-  .table-vacancies td:nth-child(2), .table-vacancies th:nth-child(2) { white-space: normal; width: auto; }
+  /* data tables with a fixed column shape (list.html, score_url.html): column
+     widths come from an explicit <colgroup> in the template, not guessed by
+     the browser from content. Auto layout kept handing surplus width to
+     whichever column had the least content (usually the empty "Флаги"
+     column) instead of the vacancy name, squeezing the decision buttons into
+     a sliver - table-layout:fixed with real percentages makes every column's
+     width deterministic regardless of what's actually in each row. */
+  .table-fixed { table-layout: fixed; }
+  .table-fixed td, .table-fixed th { overflow-wrap: break-word; white-space: normal; }
 
-  .decision-cell { display: flex; gap: 0.25rem; }
+  /* decision-cell buttons are plain inline elements (NOT a flex row) on
+     purpose - a flexbox inside a table cell will happily shrink its children
+     below their set width when the column is tight, which made the buttons
+     collapse to slivers. Fixed-size non-flex buttons can't do that. */
   .decision-cell button {
     width: 2.1rem; height: 2.1rem; padding: 0; display: inline-flex;
     align-items: center; justify-content: center; font-size: 1rem; line-height: 1;
+    margin-right: 0.25rem; vertical-align: middle;
   }
+  .decision-cell button:last-child { margin-right: 0; }
 
   /* ---------- badges & chips ---------- */
   .badge {
