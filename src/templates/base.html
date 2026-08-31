@@ -174,8 +174,21 @@
   tbody tr { transition: background-color 0.1s; }
   tbody tr:hover td { background: var(--surface-2); }
   .score { font-weight: 700; font-family: var(--font-mono); }
-  .decision-cell { display: flex; gap: 0.3rem; }
-  .decision-cell button { padding: 0.3rem 0.55rem; font-size: 0.95rem; line-height: 1; }
+
+  /* vacancy tables (list.html, score_url.html): every column shrinks to its
+     content (nowrap) except the vacancy name/employer column, which is the
+     only one meant to flex and absorb the row's leftover width. Without this,
+     auto table layout hands surplus width to whichever column has no content
+     to size against (usually the empty "Флаги" column), leaving a huge dead
+     gap before the decision buttons instead of a tight, aligned table. */
+  .table-vacancies td, .table-vacancies th { white-space: nowrap; width: 1%; }
+  .table-vacancies td:nth-child(2), .table-vacancies th:nth-child(2) { white-space: normal; width: auto; }
+
+  .decision-cell { display: flex; gap: 0.25rem; }
+  .decision-cell button {
+    width: 2.1rem; height: 2.1rem; padding: 0; display: inline-flex;
+    align-items: center; justify-content: center; font-size: 1rem; line-height: 1;
+  }
 
   /* ---------- badges & chips ---------- */
   .badge {
@@ -197,9 +210,14 @@
 
   /* ---------- surfaces / panels ---------- */
   .chart-wrap {
-    overflow-x: auto; background: var(--surface); border: 1px solid var(--border);
-    border-radius: var(--radius-md); padding: 1.1rem 1.25rem; box-shadow: var(--shadow-sm);
+    overflow-x: auto; -webkit-overflow-scrolling: touch; background: var(--surface);
+    border: 1px solid var(--border); border-radius: var(--radius-md);
+    padding: 1.1rem 1.25rem; box-shadow: var(--shadow-sm);
   }
+  /* used to wrap a <table> directly (no extra padding, table's own cell
+     padding does the spacing) while still getting the card border/shadow/
+     rounded corners and horizontal scroll on narrow screens */
+  .chart-wrap.flush { padding: 0; }
   pre.notes {
     white-space: pre-wrap; word-wrap: break-word; background: var(--surface);
     border: 1px solid var(--border); border-radius: var(--radius-md); padding: 1rem;
@@ -262,9 +280,40 @@
   footer { color: var(--text-faint); font-size: 0.78rem; }
 
   @media (max-width: 640px) {
-    body { padding: 1.1rem 0.9rem 2.5rem; }
-    .topnav { flex-direction: column; align-items: flex-start; }
-    .topnav nav { gap: 0; margin-left: -0.7rem; }
+    body { padding: 1rem 0.85rem 2.25rem; font-size: 14.5px; }
+    h2 { font-size: 1.2rem; }
+    h3 { font-size: 1rem; }
+
+    .topnav { flex-direction: column; align-items: stretch; gap: 0.6rem; }
+    .topnav nav { gap: 0.1rem; margin: 0 -0.4rem; }
+    .topnav nav a, .topnav nav form button { padding: 0.55rem 0.6rem; }
+    .topnav nav form { margin-left: auto; }
+
+    /* tighter card padding so content isn't fighting the viewport for room */
+    .chart-wrap { padding: 0.8rem 0.9rem; }
+    .chart-wrap.flush { padding: 0; }
+
+    /* filters/forms: stack instead of cramming inline fields side by side */
+    .filters { flex-direction: column; align-items: stretch; gap: 0.6rem; }
+    .filters label { justify-content: space-between; }
+    .filters input, .filters select { flex: 1; min-width: 0; }
+
+    /* tables: allow horizontal scroll (already set on .chart-wrap) but shrink
+       the type/padding so at least a couple of columns are visible before
+       the user needs to swipe */
+    table { font-size: 0.82rem; }
+    th, td { padding: 0.5rem 0.5rem; }
+    .decision-cell button { width: 1.95rem; height: 1.95rem; font-size: 0.9rem; }
+
+    /* bigger tap targets throughout - 0.45rem/0.85rem on a mouse cursor is
+       fine, but too tight for a thumb */
+    button, .btn { padding: 0.55rem 0.9rem; }
+    input[type="text"], input[type="url"], input[type="number"], input[type="password"],
+    input[type="email"], select, textarea { padding: 0.55rem 0.65rem; }
+
+    /* button groups (vacancy card actions, archive/liked panels) already wrap
+       via inline-block, just tighten the row gap so it doesn't look sparse */
+    form.inline { margin: 0 0.3rem 0.5rem 0; }
   }
 </style>
 </head>
