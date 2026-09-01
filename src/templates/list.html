@@ -218,7 +218,7 @@ pollReassessStatus();
      data-active="{{ '1' if latest.status == 'running' else '0' }}">
   {% if latest.status == 'running' %}
   <p style="margin:0 0 0.3rem;" id="pipeline-stage-text">
-    ⟳ Выполняется: <strong>{{ {'fetch': 'сбор вакансий', 'score': 'оценка', 'digest': 'дайджест', 'check_liked': 'проверка «Подходит»', 'check_archive': 'проверка архива', 'reassess': 'переоценка архива'}.get(latest.stage, latest.stage) }}</strong>
+    ⟳ Выполняется: <strong>{{ {'fetch': 'сбор вакансий', 'score': 'оценка', 'digest': 'дайджест', 'check_liked': 'проверка «Подходит»', 'check_archive': 'проверка архива', 'reassess': 'переоценка архива', 'cleanup_stop_words': 'чистка устаревших минус-слов'}.get(latest.stage, latest.stage) }}</strong>
     {% if latest.total %}({{ latest.done }}/{{ latest.total }}){% endif %}
   </p>
   <div class="progress-bar"><div class="progress-fill" id="pipeline-progress-fill"
@@ -238,6 +238,7 @@ pollReassessStatus();
   const stageLabels = {
     fetch: "сбор вакансий", score: "оценка", digest: "дайджест",
     check_liked: "проверка «Подходит»", check_archive: "проверка архива", reassess: "переоценка архива",
+    cleanup_stop_words: "чистка устаревших минус-слов",
   };
   function poll() {
     fetch("/api/pipeline-status").then((r) => r.json()).then((runs) => {

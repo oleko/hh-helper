@@ -152,6 +152,22 @@
       Вакансии, где в названии или описании встречается любое из этих слов, сразу
       уходят в Архив без оценки — экономит токены на заведомо ненужном. Пусто —
       фильтр выключен.</p>
+    {% if stale_stop_words %}
+    <div style="margin:0.6rem 0; padding:0.7rem 0.9rem; background:var(--warning-bg); border-radius:var(--radius-md);">
+      <strong>Устаревшие минус-слова ({{ stale_stop_words_total }} вакансий)</strong>
+      <p class="muted" style="margin:0.3rem 0;">Эти слова уже убраны из списка выше (или ты
+        собираешься их убрать и сохранить), но вакансии в «Архиве» остались отклонены со старой
+        причиной — она сама не пересчитывается:</p>
+      <ul style="margin:0 0 0.6rem; padding-left:1.2rem; font-size:0.88rem;">
+        {% for word, count in stale_stop_words.items() %}
+        <li><code>{{ word }}</code> — {{ count }}</li>
+        {% endfor %}
+      </ul>
+      <button type="button" id="cleanup-stale-btn" onclick="cleanupStaleStopWords(this)">🧹 Пересчитать эти вакансии ({{ stale_stop_words_total }})</button>
+      <button type="button" id="cleanup-stale-stop-btn" onclick="stopCleanupStaleStopWords()" style="display:none;">⏹ Остановить</button>
+      <span id="cleanup-stale-msg" class="muted"></span>
+    </div>
+    {% endif %}
     <br>
     <p class="muted" style="margin:0 0 0.3rem;">Ничего не отмечено в категории —
        фильтр по ней не применяется (ищем без ограничения). На SuperJob из каждой
@@ -344,6 +360,84 @@ async function generateCareerAdvice(btn) {
     restore();
   }
 }
+
+async function cleanupStaleStopWords(btn) {
+  const startBtn = document.getElementById("cleanup-stale-btn");
+  const stopBtn = document.getElementById("cleanup-stale-stop-btn");
+  const msg = document.getElementById("cleanup-stale-msg");
+  startBtn.disabled = true;
+  msg.textContent = "Запускаю…";
+  try {
+    const resp = await fetch("/settings/stop-words/cleanup-stale", {method: "POST"});
+    if (resp.status === 409) {
+      msg.textContent = "Уже выполняется другой прогон — попробуй позже.";
+      startBtn.disabled = false;
+      return;
+    }
+    const data = await resp.json();
+    if (!data.ok) {
+      msg.textContent = "Ошибка: " + (data.msg || "неизвестная");
+      startBtn.disabled = false;
+      return;
+    }
+    startBtn.style.display = "none";
+    stopBtn.style.display = "";
+    stopBtn.disabled = false;
+    msg.textContent = "Запущено, прогресс — на главной.";
+    cleanupStaleTracking = true;
+    pollCleanupStaleStatus();
+  } catch (e) {
+    msg.textContent = "Ошибка запроса: " + e;
+    startBtn.disabled = false;
+  }
+}
+
+async function stopCleanupStaleStopWords() {
+  const stopBtn = document.getElementById("cleanup-stale-stop-btn");
+  const msg = document.getElementById("cleanup-stale-msg");
+  stopBtn.disabled = true;
+  msg.textContent = "Останавливаю…";
+  try {
+    // тот же флаг остановки, что и у переоценки архива, — это тот же
+    // cmd_reassess_archive под капотом, просто с фильтром по id
+    const resp = await fetch("/archive/reassess/stop", {method: "POST"});
+    const data = await resp.json();
+    msg.textContent = data.ok
+      ? "Останавливаю — доработает текущую вакансию и выйдет, уже пересчитанное сохранено."
+      : "Не удалось остановить.";
+  } catch (e) {
+    msg.textContent = "Ошибка запроса: " + e;
+    stopBtn.disabled = false;
+  }
+}
+
+// та же защита от зацикленного reload, что и у переоценки архива в list.html:
+// без флага "мы реально видели прогон running" холодная загрузка страницы
+// после ЛЮБОЙ прошлой (уже готовой) чистки перезагружала бы страницу вечно.
+let cleanupStaleTracking = false;
+async function pollCleanupStaleStatus() {
+  const msg = document.getElementById("cleanup-stale-msg");
+  if (!msg) return;  // панель не отрендерена (stale_stop_words сейчас пуст)
+  try {
+    const resp = await fetch("/api/pipeline-status");
+    const runs = await resp.json();
+    const latest = runs[0];
+    const running = !!(latest && latest.stage === "cleanup_stop_words" && latest.status === "running");
+    if (running) {
+      cleanupStaleTracking = true;
+      document.getElementById("cleanup-stale-btn").style.display = "none";
+      document.getElementById("cleanup-stale-stop-btn").style.display = "";
+      msg.textContent = `Выполняется: ${latest.done}/${latest.total || "?"}`;
+      setTimeout(pollCleanupStaleStatus, 4000);
+    } else if (cleanupStaleTracking) {
+      cleanupStaleTracking = false;
+      location.reload();
+    }
+  } catch (e) {
+    setTimeout(pollCleanupStaleStatus, 4000);
+  }
+}
+pollCleanupStaleStatus();
 
 async function runNow() {
   const btn = document.getElementById("run-now-btn");

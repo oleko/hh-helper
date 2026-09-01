@@ -371,6 +371,18 @@ class Storage:
                 "SELECT * FROM vacancies WHERE origin = ? ORDER BY fetched_at DESC", (origin,)
             ).fetchall()
 
+    def minus_word_rejections(self) -> list[sqlite3.Row]:
+        """Вакансии в «Архиве», отклонённые по минус-слову (decision_reason
+        начинается с "минус-слово: ") — используется, чтобы найти те, чьё
+        слово с тех пор убрали из активного списка (см. get_stop_words в
+        main.py), для точечного пересчёта именно этой группы вместо дорогой
+        переоценки всего архива (см. cmd_cleanup_stale_stop_words)."""
+        with self._conn() as conn:
+            return conn.execute(
+                "SELECT id, name, decision_reason FROM vacancies "
+                "WHERE decision = 'not_fit' AND decision_reason LIKE 'минус-слово: %'"
+            ).fetchall()
+
     def record_token_usage(self, provider: str, task: str, usage: dict | None) -> None:
         """usage — LLMProvider.last_usage после provider.complete() (None, если
         вызов упал до получения ответа — тогда просто ничего не пишем)."""

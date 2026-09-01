@@ -51,6 +51,7 @@ from .main import (
     load_career_base,
     load_models_config,
     refresh_vacancy_status,
+    stale_minus_word_stats,
 )
 from .scorer import build_corrections_note, get_metro, score_vacancy, vacancy_to_text
 from .sources import get_full_vacancy, get_vacancy_status, parse_vacancy_url
@@ -468,6 +469,19 @@ def create_app(cfg: dict) -> Flask:
         storage.set_setting(REASSESS_STOP_SETTING, "1")
         return jsonify({"ok": True})
 
+    @app.post("/settings/stop-words/cleanup-stale")
+    def settings_cleanup_stale_stop_words():
+        """Точечно пересчитывает только вакансии, отклонённые по минус-слову,
+        которого больше нет в активном списке (см. /settings, stale_stop_words) —
+        тем же фоновым subprocess-паттерном, что и archive/reassess, под общим
+        guard'ом на конкурентный прогон. Останавливается той же кнопкой/флагом
+        (REASSESS_STOP_SETTING), что и переоценка архива — это тот же
+        cmd_reassess_archive под капотом, просто с фильтром по id."""
+        if _pipeline_busy():
+            abort(409, "Прогон уже выполняется.")
+        _run_in_background("cleanup-stale-stop-words")
+        return jsonify({"ok": True})
+
     @app.get("/settings")
     def settings_page():
         backup_keep_count = int(storage.get_setting("backup_keep_count", "7"))
@@ -483,6 +497,7 @@ def create_app(cfg: dict) -> Flask:
         metro_lines_text = "\n".join(get_priority_metro_lines(storage))
         search_queries_text = "\n".join(get_search_queries(storage, cfg))
         stop_words_text = "\n".join(get_stop_words(storage))
+        stale_stop_words = stale_minus_word_stats(storage)
         latest_runs = storage.latest_pipeline_runs(3)
         run_in_progress = any(r["status"] == "running" for r in latest_runs)
         return render_template(
@@ -490,6 +505,8 @@ def create_app(cfg: dict) -> Flask:
             page="settings",
             search_queries_text=search_queries_text,
             stop_words_text=stop_words_text,
+            stale_stop_words={w: len(ids) for w, ids in stale_stop_words.items()},
+            stale_stop_words_total=sum(len(ids) for ids in stale_stop_words.values()),
             run_in_progress=run_in_progress,
             backup_keep_count=backup_keep_count,
             collection_paused=collection_paused,

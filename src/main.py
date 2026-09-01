@@ -15,6 +15,9 @@
   python -m src.main check-archive        — то же самое для «Архива» (decision=not_fit)
   python -m src.main reassess-archive     — переоценивает живой (не снятый с публикации) архив,
                                              подходящие по новому score возвращает в «Разбор»
+  python -m src.main cleanup-stale-stop-words — точечно пересчитывает только вакансии,
+                                             отклонённые по минус-слову, которого больше
+                                             нет в активном списке (см. /settings)
   python -m src.main backup               — резервная копия БД в ./backups/, хранит последние 7
 
 Типичный сценарий (например, из cron раз в день):
@@ -562,7 +565,7 @@ def cmd_check_liked(cfg: dict) -> None:
 REASSESS_STOP_SETTING = "reassess_stop_requested"
 
 
-def cmd_reassess_archive(cfg: dict) -> None:
+def cmd_reassess_archive(cfg: dict, only_ids: set[str] | None = None, stage: str = "reassess") -> None:
     """Переоценивает архив (decision='not_fit'), исключая снятые с публикации
     (см. hide_archived в storage.list_scored — та же логика, что скрывает их
     со страницы «Архив»). Для каждой вакансии — тот же путь, что в обычном
@@ -570,6 +573,11 @@ def cmd_reassess_archive(cfg: dict) -> None:
     вызов score_vacancy(). Вакансии, чей новый score перевалил порог
     автоотсечения, возвращаются в «Разбор» (decision=NULL) — остальные
     остаются в архиве, но с обновлённой оценкой/обоснованием.
+
+    `only_ids` — если задано, переоценивает не весь живой архив, а только эти
+    id (см. cmd_cleanup_stale_stop_words) — точечный, дешёвый пересчёт вместо
+    дорогой переоценки всего архива. `stage` — имя стадии в pipeline_runs, для
+    отдельной подписи прогресс-бара на главной (см. stageLabels в list.html).
 
     Дорогая операция (одиночный скоринг на весь живой архив — тысячи вызовов
     LLM), поэтому запускается только по явному действию из /archive (кнопка
@@ -600,8 +608,10 @@ def cmd_reassess_archive(cfg: dict) -> None:
     # актуальности (см. cmd_check_actuality/refresh_vacancy_status) — снятые
     # переоценивать смысла нет, их и так не вернуть в «Разбор».
     rows = storage.list_scored(decision="not_fit", hide_archived=True)
+    if only_ids is not None:
+        rows = [r for r in rows if r["id"] in only_ids]
     log.info("К переоценке: %s живых вакансий из «Архива»", len(rows))
-    run_id = storage.start_pipeline_run("reassess", total=len(rows))
+    run_id = storage.start_pipeline_run(stage, total=len(rows))
     returned_count = 0
     try:
         for i, row in enumerate(rows, 1):
@@ -671,6 +681,51 @@ def cmd_reassess_archive(cfg: dict) -> None:
         storage.finish_pipeline_run(run_id, "error", str(e))
         raise
     storage.finish_pipeline_run(run_id, "done", f"переоценено: {len(rows)}, возвращено в «Разбор»: {returned_count}")
+
+
+def stale_minus_word_stats(storage: Storage) -> dict[str, list[str]]:
+    """Слова, которых больше нет в активном списке минус-слов (см.
+    get_stop_words), но которые всё ещё числятся причиной отклонения у
+    вакансий в «Архиве» — правка списка в /settings не пересчитывает уже
+    принятые решения задним числом, так что старые отклонения так и висят
+    с текстом убранного слова. Возвращает {слово: [id вакансии, ...]} только
+    для слов, которых сейчас в активном списке нет — используется и для
+    подсказки на /settings, и чтобы cmd_cleanup_stale_stop_words знал, какие
+    именно id пересчитывать."""
+    active = {w.lower() for w in get_stop_words(storage)}
+    prefix = "минус-слово: "
+    stale: dict[str, list[str]] = {}
+    for row in storage.minus_word_rejections():
+        reason = row["decision_reason"] or ""
+        if not reason.startswith(prefix):
+            continue
+        word = reason[len(prefix):].split(" (", 1)[0].strip()
+        if word.lower() not in active:
+            stale.setdefault(word, []).append(row["id"])
+    return stale
+
+
+def cmd_cleanup_stale_stop_words(cfg: dict) -> None:
+    """Точечно пересчитывает только вакансии, отклонённые по минус-слову,
+    которого больше нет в активном списке (см. stale_minus_word_stats) —
+    дешёвая целевая альтернатива полной переоценке архива специально для
+    случая «убрал слово из настроек, а старые отклонения по нему остались
+    висеть». Переиспользует cmd_reassess_archive с фильтром по id и отдельным
+    именем стадии, чтобы прогресс-бар на главной не путал это с обычной
+    переоценкой архива."""
+    storage = Storage(cfg["paths"]["db"])
+    stale = stale_minus_word_stats(storage)
+    all_ids = {vid for ids in stale.values() for vid in ids}
+    if not all_ids:
+        run_id = storage.start_pipeline_run("cleanup_stop_words", total=0)
+        storage.finish_pipeline_run(run_id, "done", "устаревших отклонений по минус-словам не найдено")
+        log.info("Нет вакансий с устаревшими минус-словами — нечего пересчитывать.")
+        return
+    log.info(
+        "Устаревшие минус-слова: %s (всего %s вакансий) — пересчитываю",
+        ", ".join(f"{w} ({len(ids)})" for w, ids in stale.items()), len(all_ids),
+    )
+    cmd_reassess_archive(cfg, only_ids=all_ids, stage="cleanup_stop_words")
 
 
 def cmd_backup(cfg: dict, keep: int | None = None) -> None:
@@ -749,6 +804,7 @@ def main() -> None:
     sub.add_parser("check-liked")
     sub.add_parser("check-archive")
     sub.add_parser("reassess-archive")
+    sub.add_parser("cleanup-stale-stop-words")
     sub.add_parser("backup")
 
     args = parser.parse_args()
@@ -776,6 +832,8 @@ def main() -> None:
         cmd_check_actuality(cfg, "not_fit")
     elif args.command == "reassess-archive":
         cmd_reassess_archive(cfg)
+    elif args.command == "cleanup-stale-stop-words":
+        cmd_cleanup_stale_stop_words(cfg)
     elif args.command == "backup":
         cmd_backup(cfg)
     else:
