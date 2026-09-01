@@ -992,6 +992,10 @@ def create_app(cfg: dict) -> Flask:
                 },
                 metro,
             )
+            if row["decision"] == "not_fit":
+                # решение не меняется, но обновляем причину — иначе на карточке
+                # так и висело бы старое "минус-слово: X" даже после переоценки
+                storage.set_decision(vacancy_id, "not_fit", f"минус-слово: {hit}")
         else:
             corrections_note = build_corrections_note(storage.disagreements())
             provider = get_provider(cfg, "score", storage)
@@ -1003,6 +1007,10 @@ def create_app(cfg: dict) -> Flask:
             if row["decision"] == "not_fit" and fit_score is not None and fit_score > auto_reject_max:
                 storage.set_decision(vacancy_id, None, f"переоценка вручную: fit_score {fit_score} > {auto_reject_max}")
                 returned_to_unsorted = True
+            elif row["decision"] == "not_fit" and fit_score is not None:
+                # остаётся в архиве, но причина обновляется на актуальную, а не
+                # на текст самой первой оценки (см. комментарий у минус-слова выше)
+                storage.set_decision(vacancy_id, "not_fit", f"переоценка вручную: fit_score {fit_score} ≤ {auto_reject_max}")
         if request.form.get("ajax"):
             return jsonify({"ok": True, "returned_to_unsorted": returned_to_unsorted})
         return redirect(url_for("vacancy_detail", vacancy_id=vacancy_id))
@@ -1043,49 +1051,74 @@ def create_app(cfg: dict) -> Flask:
             row = storage.get(vacancy_id)
         priority_lines = get_priority_metro_lines(storage)
         text = vacancy_to_text(full, priority_lines)
-        if row["score"] is None:
-            # тот же путь, что и обычный cmd_score: сначала минус-слова (бесплатно,
-            # без похода в LLM), иначе скоринг + автоотсев по тому же порогу —
-            # вакансия по ссылке теперь ведёт себя как вакансии из обычного сбора
-            # (см. комментарий у origin в storage.py), а не живёт только на своей
-            # карточке. Резюме/письмо здесь больше не готовятся автоматически —
-            # только по клику «Подготовить резюме и письмо» на самой карточке,
-            # как и для любой другой вакансии.
-            station, line = get_metro(full)
-            metro = {"station": station, "line": line, "priority": bool(line and line in priority_lines)}
-            stop_words = [w.lower() for w in get_stop_words(storage)]
-            hit = next((w for w in stop_words if w in text.lower()), None)
-            if hit is not None:
-                storage.save_score(
-                    vacancy_id,
-                    {
-                        "fit_score": 0,
-                        "track": "B",
-                        "salary_fit": "не указана",
-                        "red_flags": [f"минус-слово: {hit}"],
-                        "rationale": f"Автоотсев по минус-слову «{hit}».",
-                        "recommend": "skip",
-                        "ats_keywords": [],
-                    },
-                    metro,
-                )
+        # тот же путь, что и обычный cmd_score: сначала минус-слова (бесплатно,
+        # без похода в LLM), иначе скоринг + автоотсев по тому же порогу —
+        # вакансия по ссылке ведёт себя как вакансии из обычного сбора (см.
+        # комментарий у origin в storage.py). Пересчитываем ВСЕГДА, а не только
+        # для ещё не оценённых — иначе повторная отправка той же ссылки (или
+        # ссылки на вакансию, которая уже была подобрана обычным сбором) молча
+        # показывала старый результат, посчитанный ещё при старых настройках
+        # (например, по минус-слову, которое с тех пор убрали из списка).
+        # Существующее решение человека (fit/not_fit) не перезаписываем волюнтаристски
+        # автоотсевом — та же защита, что и в vacancy_reassess: автоматика может
+        # только вернуть в «Разбор» ранее отклонённую по старым правилам вакансию,
+        # но никогда не пометит «не подходит» то, что уже разобрано руками.
+        had_decision = row["decision"]
+        station, line = get_metro(full)
+        metro = {"station": station, "line": line, "priority": bool(line and line in priority_lines)}
+        stop_words = [w.lower() for w in get_stop_words(storage)]
+        hit = next((w for w in stop_words if w in text.lower()), None)
+        if hit is not None:
+            storage.save_score(
+                vacancy_id,
+                {
+                    "fit_score": 0,
+                    "track": "B",
+                    "salary_fit": "не указана",
+                    "red_flags": [f"минус-слово: {hit}"],
+                    "rationale": f"Автоотсев по минус-слову «{hit}».",
+                    "recommend": "skip",
+                    "ats_keywords": [],
+                },
+                metro,
+            )
+            if had_decision is None:
                 storage.set_decision(vacancy_id, "not_fit", f"минус-слово: {hit}")
                 storage.set_liked(vacancy_id, False)
                 storage.mark_status(vacancy_id, "skip")
-            else:
-                corrections_note = build_corrections_note(storage.disagreements())
-                provider = get_provider(cfg, "score", storage)
-                result = score_vacancy(provider, career_state["text"], text, corrections_note)
-                storage.record_token_usage(provider.name, "score", provider.last_usage)
-                storage.save_score(vacancy_id, result, metro)
-                fit_score = result.get("fit_score")
-                auto_reject_max = int(storage.get_setting("auto_reject_max_score", "40"))
+            elif had_decision == "not_fit":
+                # решение не меняется (уже было отклонено), но обновляем причину —
+                # иначе на карточке так и висело бы старое "минус-слово: X", даже
+                # если сейчас сработало другое слово или то же самое
+                storage.set_decision(vacancy_id, "not_fit", f"минус-слово: {hit}")
+        else:
+            corrections_note = build_corrections_note(storage.disagreements())
+            provider = get_provider(cfg, "score", storage)
+            result = score_vacancy(provider, career_state["text"], text, corrections_note)
+            storage.record_token_usage(provider.name, "score", provider.last_usage)
+            storage.save_score(vacancy_id, result, metro)
+            fit_score = result.get("fit_score")
+            auto_reject_max = int(storage.get_setting("auto_reject_max_score", "40"))
+            if had_decision is None:
                 if fit_score is not None and fit_score <= auto_reject_max:
                     storage.set_decision(
                         vacancy_id, "not_fit", f"автоматически: fit_score {fit_score} ≤ {auto_reject_max}"
                     )
                     storage.set_liked(vacancy_id, False)
                     storage.mark_status(vacancy_id, "skip")
+            elif had_decision == "not_fit":
+                if fit_score is not None and fit_score > auto_reject_max:
+                    storage.set_decision(
+                        vacancy_id, None, f"переоценка по ссылке: fit_score {fit_score} > {auto_reject_max}"
+                    )
+                elif fit_score is not None:
+                    # остаётся в архиве, но причина обновляется на актуальную —
+                    # без этого decision_reason навсегда застревал бы на тексте
+                    # причины самой первой оценки (например, давно снятого
+                    # минус-слова), даже когда score теперь пересчитан честно
+                    storage.set_decision(
+                        vacancy_id, "not_fit", f"переоценка по ссылке: fit_score {fit_score} ≤ {auto_reject_max}"
+                    )
         return redirect(url_for("vacancy_detail", vacancy_id=vacancy_id))
 
     return app

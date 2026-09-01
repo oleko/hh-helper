@@ -641,6 +641,10 @@ def cmd_reassess_archive(cfg: dict) -> None:
                     },
                     metro,
                 )
+                # решение не меняется (уже был в архиве), но причина обновляется —
+                # без этого decision_reason навсегда застревал бы на тексте самой
+                # первой оценки, даже если сейчас сработало другое минус-слово
+                storage.set_decision(row["id"], "not_fit", f"минус-слово: {hit} (переоценка архива)")
                 log.info("[%s/%s] %s — по-прежнему отсев по минус-слову «%s»", i, len(rows), row["name"], hit)
                 storage.update_pipeline_run(run_id, done=i)
                 continue
@@ -653,6 +657,10 @@ def cmd_reassess_archive(cfg: dict) -> None:
                 # теперь проходит порог — возвращаем в «Разбор» на свежий взгляд
                 storage.set_decision(row["id"], None, f"переоценка архива: fit_score {fit_score} > {auto_reject_max}")
                 returned_count += 1
+            elif fit_score is not None:
+                # остаётся в архиве, но причина обновляется на актуальную — та же
+                # логика, что и в ветке минус-слова выше
+                storage.set_decision(row["id"], "not_fit", f"переоценка архива: fit_score {fit_score} ≤ {auto_reject_max}")
             log.info(
                 "[%s/%s] %s — score=%s recommend=%s%s",
                 i, len(rows), row["name"], result.get("fit_score"), result.get("recommend"),
