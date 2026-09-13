@@ -11,10 +11,12 @@
 """
 from __future__ import annotations
 
+import json
 import logging
 import re
 
 from .llm_provider import LLMProvider
+from .scorer import _extract_json
 
 log = logging.getLogger("tailor")
 
@@ -174,3 +176,61 @@ def generate_career_base_advice(provider: LLMProvider, career_base_md: str, fit_
         f"---\n\nВАКАНСИИ «ПОДХОДИТ» ДЛЯ АНАЛИЗА:\n{fit_vacancies_summary}"
     )
     return provider.complete(CAREER_BASE_ADVICE_SYSTEM_PROMPT, user_content, max_tokens=1500, temperature=0.4)
+
+
+RESUME_SCORE_SYSTEM_PROMPT = """Ты — карьерный консультант и эксперт по ATS-системам, оцениваешь
+готовое резюме кандидата (текст снят со страницы резюме на hh.ru).
+
+Верни ТОЛЬКО валидный JSON, без markdown-обёртки и пояснений до/после, по схеме:
+{
+  "overall_score": <0-100, целое>,
+  "ats_readability": "хорошо" | "средне" | "плохо",
+  "strengths": ["...", ...],
+  "weaknesses": ["...", ...],
+  "missing_from_career_base": ["...", ...],
+  "suggestions": ["...", ...],
+  "red_flags": ["...", ...]
+}
+
+Критерии:
+- overall_score — насколько резюме убедительно продаёт кандидата рекрутёру И проходит через
+  ATS-парсинг: структура, конкретные измеримые достижения (цифры, %, ₽, масштаб) вместо общих
+  фраз про обязанности, соответствие заголовка целевой роли, отсутствие воды.
+- ats_readability — отдельно оцени именно техническую читаемость: понятная структура разделов,
+  нет забитых в таблицы/картинки данных (сам текст ты не видишь как картинку, но по структуре
+  текста можно понять, был ли контент, вероятно, нечитаемым для парсера).
+- strengths / weaknesses — 3-6 пунктов каждый, конкретно про ЭТО резюме, не общие советы.
+- suggestions — 3-8 пунктов, каждый — конкретная переформулировка или правка ("замени '...' на
+  '...'"), а не абстрактный совет вроде "добавь больше цифр".
+- red_flags — явные проблемы (нет ни одной цифры, заголовок не совпадает с описанным опытом,
+  резюме слишком короткое/длинное и т.п.); пустой список, если серьёзных проблем нет.
+- missing_from_career_base — заполняй, ТОЛЬКО если тебе дали карьерную базу кандидата: факты,
+  цифры или достижения из базы, которые подтверждены и релевантны, но не попали в резюме. Если
+  карьерная база не передана — верни пустой список, не выдумывай.
+Никогда не изобретай цифры и факты, которых нет ни в резюме, ни в карьерной базе."""
+
+
+def score_resume(provider: LLMProvider, resume_text: str, career_base_md: str = "") -> dict:
+    """Оценка резюме кандидата (снятого со страницы на hh.ru — см. resume_fetch.py):
+    структура/ATS-читаемость сама по себе, плюс — если передана career_base_md —
+    сверка с реальными фактами карьерной базы (какие подтверждённые достижения
+    не попали в текст резюме). Ничего не сохраняет, вызывающий сам решает, что
+    делать с результатом (см. /tool/score-resume в webapp.py)."""
+    user_content = f"ТЕКСТ РЕЗЮМЕ:\n{resume_text}\n\n"
+    if career_base_md.strip():
+        user_content += f"---\n\nКАРЬЕРНАЯ БАЗА КАНДИДАТА (для сверки фактов):\n{career_base_md}\n\n"
+    user_content += "Верни JSON по схеме из системного промпта."
+    raw = provider.complete(RESUME_SCORE_SYSTEM_PROMPT, user_content, max_tokens=1200, temperature=0.2)
+    try:
+        return _extract_json(raw)
+    except json.JSONDecodeError as e:
+        log.warning("Не удалось распарсить JSON от модели (score_resume): %s\nОтвет: %.300s", e, raw)
+        return {
+            "overall_score": None,
+            "ats_readability": "средне",
+            "strengths": [],
+            "weaknesses": [],
+            "missing_from_career_base": [],
+            "suggestions": [],
+            "red_flags": ["не удалось оценить автоматически — проверь вручную"],
+        }

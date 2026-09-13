@@ -54,11 +54,12 @@ from .main import (
     stale_minus_word_stats,
 )
 from .scorer import build_corrections_note, get_metro, score_vacancy, vacancy_to_text
+from .resume_fetch import ResumeFetchError, fetch_resume_text, parse_resume_url
 from .sources import get_full_vacancy, get_vacancy_status, parse_vacancy_url
 from .storage import Storage
 from .superjob_client import SuperJobApiError, SuperJobClient
 from .superjob_client import prefixed_id as sj_prefixed_id
-from .tailor import generate_career_base_advice, generate_search_queries, tailor_for_vacancy
+from .tailor import generate_career_base_advice, generate_search_queries, score_resume, tailor_for_vacancy
 
 _SOURCE_ERRORS = (HHApiError, SuperJobApiError, HabrApiError)
 
@@ -1137,5 +1138,39 @@ def create_app(cfg: dict) -> Flask:
                         vacancy_id, "not_fit", f"переоценка по ссылке: fit_score {fit_score} ≤ {auto_reject_max}"
                     )
         return redirect(url_for("vacancy_detail", vacancy_id=vacancy_id))
+
+    @app.get("/tool/score-resume")
+    def score_resume_form():
+        return render_template("score_resume.html", page="tool_resume")
+
+    @app.post("/tool/score-resume")
+    def score_resume_submit():
+        """Оценка резюме по прямой публичной ссылке hh.ru — без OAuth, страница
+        резюме читается как обычный HTML (см. resume_fetch.py: официальный API
+        не даёт токеном приложения доступ к чужому/своему резюме, только
+        персональная авторизация, которой в проекте нет). Синхронно, один вызов
+        модели — как и /tool/score-url, не фоновый пайплайн."""
+        url = (request.form.get("url") or "").strip()
+        resume_hash = parse_resume_url(url) if url else None
+        if resume_hash is None:
+            return render_template(
+                "score_resume.html", page="tool_resume", url=url,
+                error="Не распознал ссылку — нужна прямая ссылка на резюме hh.ru (hh.ru/resume/<hash>).",
+            )
+        try:
+            text = fetch_resume_text(url, cfg["hh"]["user_agent"])
+        except ResumeFetchError as e:
+            return render_template(
+                "score_resume.html", page="tool_resume", url=url, error=f"Не удалось получить резюме: {e}",
+            )
+        try:
+            provider = get_provider(cfg, "tailor", storage)
+            result = score_resume(provider, text, career_state["text"])
+            storage.record_token_usage(provider.name, "tailor", provider.last_usage)
+        except SystemExit as e:
+            return render_template("score_resume.html", page="tool_resume", url=url, error=str(e))
+        except Exception as e:  # noqa: BLE001 — единичный вызов модели, не фоновый прогон со своим протоколом ошибок
+            return render_template("score_resume.html", page="tool_resume", url=url, error=str(e))
+        return render_template("score_resume.html", page="tool_resume", url=url, result=result)
 
     return app

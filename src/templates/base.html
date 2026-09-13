@@ -353,6 +353,7 @@
     <a href="{{ url_for('liked_page') }}" class="{{ 'active' if page == 'liked' }}">Подходит{% if nav_counts %} <span id="nav-count-fit">({{ nav_counts.fit }})</span>{% endif %}</a>
     <a href="{{ url_for('archive_page') }}" class="{{ 'active' if page == 'archive' }}">Архив{% if nav_counts %} <span id="nav-count-not_fit">({{ nav_counts.not_fit }})</span>{% endif %}</a>
     <a href="{{ url_for('score_url_form') }}" class="{{ 'active' if page == 'tool' }}">Вакансия по ссылке</a>
+    <a href="{{ url_for('score_resume_form') }}" class="{{ 'active' if page == 'tool_resume' }}">Резюме по ссылке</a>
     <a href="{{ url_for('stats_page') }}">Статистика</a>
     <a href="{{ url_for('settings_page') }}" class="{{ 'active' if page == 'settings' }}"
        {% if update_available %}style="font-weight:800;" title="Доступна новая версия"{% endif %}>Настройки{% if update_available %} (!){% endif %}</a>

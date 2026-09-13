@@ -1,0 +1,77 @@
+{% extends "base.html" %}
+{% block title %}Резюме по ссылке — hh-helper{% endblock %}
+{% block content %}
+<h2>Резюме по ссылке</h2>
+<p class="muted" style="font-size:0.92rem;">Вставь прямую ссылку на резюме с hh.ru (hh.ru/resume/&lt;hash&gt;) — своё
+или чужое, если оценивать нужно не своё. Резюме должно быть отмечено «видно всем компаниям» в настройках
+видимости на hh.ru: инструмент читает публичную страницу резюме напрямую, без входа в личный аккаунт
+(полноценная OAuth-авторизация — отдельная большая задача, для приватных резюме это единственный способ,
+пока её нет). Модель оценивает структуру и ATS-читаемость резюме и, если заполнена карьерная база,
+дополнительно сверяет его с реальными достижениями из базы — какие подтверждённые цифры и факты туда
+не попали. Ничего не сохраняется — результат считается заново при каждой отправке.</p>
+
+{% if error %}
+<p class="flags">⚠ {{ error }}</p>
+{% endif %}
+
+<form method="post" action="{{ url_for('score_resume_submit') }}"
+      onsubmit="this.querySelector('button').disabled=true; this.querySelector('button').textContent='⏳ Оцениваю… (10–20 сек)';"
+      style="display:flex; gap:0.6rem; margin-bottom:1.5rem;">
+  <input type="url" name="url" placeholder="https://hh.ru/resume/..."
+         value="{{ url or '' }}" style="flex:1; max-width:40rem;" required>
+  <button type="submit" class="btn-primary">Оценить резюме</button>
+</form>
+
+{% if result %}
+<div class="chart-wrap" style="margin-bottom:1rem;">
+  <p style="display:flex; align-items:center; gap:0.6rem; margin-bottom:0.3rem;">
+    <span class="score" style="font-size:1.4rem;{% if result.overall_score is not none %} --score-hue: {{ result.overall_score * 1.2 }};{% endif %}">{{ result.overall_score if result.overall_score is not none else "?" }}</span>
+    <span class="muted">/ 100</span>
+    <span class="chip chip-neutral">ATS-читаемость: {{ result.ats_readability or "—" }}</span>
+  </p>
+</div>
+
+{% if result.strengths %}
+<h3>Сильные стороны</h3>
+<div class="chart-wrap">
+  <ul style="margin:0; padding-left:1.2rem;">
+    {% for s in result.strengths %}<li>{{ s }}</li>{% endfor %}
+  </ul>
+</div>
+{% endif %}
+
+{% if result.weaknesses %}
+<h3>Слабые стороны</h3>
+<div class="chart-wrap">
+  <ul style="margin:0; padding-left:1.2rem;">
+    {% for w in result.weaknesses %}<li>{{ w }}</li>{% endfor %}
+  </ul>
+</div>
+{% endif %}
+
+{% if result.missing_from_career_base %}
+<h3>Есть в карьерной базе, но нет в резюме</h3>
+<div class="chart-wrap">
+  <ul style="margin:0; padding-left:1.2rem;">
+    {% for m in result.missing_from_career_base %}<li>{{ m }}</li>{% endfor %}
+  </ul>
+</div>
+{% endif %}
+
+{% if result.suggestions %}
+<h3>Что поправить</h3>
+<div class="chart-wrap">
+  <ul style="margin:0; padding-left:1.2rem;">
+    {% for s in result.suggestions %}<li>{{ s }}</li>{% endfor %}
+  </ul>
+</div>
+{% endif %}
+
+{% if result.red_flags %}
+<h3>Красные флаги</h3>
+<div class="chart-wrap">
+  <p class="flags" style="margin:0;">{{ result.red_flags | join(", ") }}</p>
+</div>
+{% endif %}
+{% endif %}
+{% endblock %}
