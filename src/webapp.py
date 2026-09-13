@@ -1140,6 +1140,10 @@ def create_app(cfg: dict) -> Flask:
         return redirect(url_for("vacancy_detail", vacancy_id=vacancy_id))
 
     def _resume_history_view() -> list[dict]:
+        """Полная история проверок для /tool/score-resume — result_json уже
+        хранит весь ответ модели (см. storage.save_resume_score), так что
+        рекомендации/сильные и слабые стороны прошлых проверок тоже доступны
+        сразу, без повторного похода к LLM — просто разворачиваем JSON."""
         rows = storage.list_resume_scores()
         views = []
         for r in rows:
@@ -1153,6 +1157,11 @@ def create_app(cfg: dict) -> Flask:
                 "overall_score": r["overall_score"],
                 "ats_readability": r["ats_readability"],
                 "resume_title": parsed.get("resume_title") or "Резюме без названия",
+                "strengths": parsed.get("strengths") or [],
+                "weaknesses": parsed.get("weaknesses") or [],
+                "missing_from_career_base": parsed.get("missing_from_career_base") or [],
+                "suggestions": parsed.get("suggestions") or [],
+                "red_flags": parsed.get("red_flags") or [],
             })
         return views
 

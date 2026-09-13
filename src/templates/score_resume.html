@@ -129,15 +129,36 @@
   </thead>
   <tbody>
   {% for h in history %}
-    <tr>
-      <td class="muted">{{ (h.scored_at or '')[:16] | replace('T', ' ') }}</td>
-      <td><a href="{{ h.url }}" target="_blank" rel="noopener">{{ h.resume_title }}</a></td>
+    <tr onclick="toggleResumeHistoryRow(this)" style="cursor:pointer;" title="Показать рекомендации этой проверки">
+      <td class="muted"><span class="history-chevron">▸</span> {{ (h.scored_at or '')[:16] | replace('T', ' ') }}</td>
+      <td><a href="{{ h.url }}" target="_blank" rel="noopener" onclick="event.stopPropagation();">{{ h.resume_title }}</a></td>
       <td class="score"{% if h.overall_score is not none %} style="--score-hue: {{ h.overall_score * 1.2 }};"{% endif %}>{{ h.overall_score if h.overall_score is not none else "?" }}</td>
       <td class="muted">{{ h.ats_readability or "—" }}</td>
+    </tr>
+    <tr hidden>
+      <td colspan="4" style="background:var(--surface-2); padding:0.8rem 1rem; font-size:0.88rem;">
+        {% if h.strengths %}<p style="margin:0 0 0.4rem;"><strong>Сильные стороны:</strong> {{ h.strengths | join("; ") }}</p>{% endif %}
+        {% if h.weaknesses %}<p style="margin:0 0 0.4rem;"><strong>Слабые стороны:</strong> {{ h.weaknesses | join("; ") }}</p>{% endif %}
+        {% if h.missing_from_career_base %}<p style="margin:0 0 0.4rem;"><strong>Есть в базе, но нет в резюме:</strong> {{ h.missing_from_career_base | join("; ") }}</p>{% endif %}
+        {% if h.suggestions %}<p style="margin:0 0 0.4rem;"><strong>Что поправить:</strong> {{ h.suggestions | join("; ") }}</p>{% endif %}
+        {% if h.red_flags %}<p class="flags" style="margin:0;">⚠ {{ h.red_flags | join(", ") }}</p>{% endif %}
+        {% if not (h.strengths or h.weaknesses or h.missing_from_career_base or h.suggestions or h.red_flags) %}
+        <p class="muted" style="margin:0;">Нет сохранённых рекомендаций для этой проверки.</p>
+        {% endif %}
+      </td>
     </tr>
   {% endfor %}
   </tbody>
 </table>
 </div>
+<script>
+function toggleResumeHistoryRow(tr) {
+  const detail = tr.nextElementSibling;
+  const chevron = tr.querySelector(".history-chevron");
+  const willShow = detail.hidden;
+  detail.hidden = !willShow;
+  if (chevron) chevron.textContent = willShow ? "▾" : "▸";
+}
+</script>
 {% endif %}
 {% endblock %}
