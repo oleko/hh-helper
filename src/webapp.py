@@ -1139,9 +1139,26 @@ def create_app(cfg: dict) -> Flask:
                     )
         return redirect(url_for("vacancy_detail", vacancy_id=vacancy_id))
 
+    def _resume_history_view() -> list[dict]:
+        rows = storage.list_resume_scores()
+        views = []
+        for r in rows:
+            try:
+                parsed = json.loads(r["result_json"] or "{}")
+            except json.JSONDecodeError:
+                parsed = {}
+            views.append({
+                "scored_at": r["scored_at"],
+                "url": r["url"],
+                "overall_score": r["overall_score"],
+                "ats_readability": r["ats_readability"],
+                "resume_title": parsed.get("resume_title") or "Резюме без названия",
+            })
+        return views
+
     @app.get("/tool/score-resume")
     def score_resume_form():
-        return render_template("score_resume.html", page="tool_resume")
+        return render_template("score_resume.html", page="tool_resume", history=_resume_history_view())
 
     @app.post("/tool/score-resume")
     def score_resume_submit():
@@ -1149,28 +1166,50 @@ def create_app(cfg: dict) -> Flask:
         резюме читается как обычный HTML (см. resume_fetch.py: официальный API
         не даёт токеном приложения доступ к чужому/своему резюме, только
         персональная авторизация, которой в проекте нет). Синхронно, один вызов
-        модели — как и /tool/score-url, не фоновый пайплайн."""
+        модели — как и /tool/score-url, не фоновый пайплайн.
+
+        Каждая отправка добавляет строку в историю (см. storage.save_resume_score),
+        не перезаписывает предыдущую — так можно показать прогресс между
+        повторными проверками одного и того же резюме (resume_hash из ссылки)."""
         url = (request.form.get("url") or "").strip()
         resume_hash = parse_resume_url(url) if url else None
         if resume_hash is None:
             return render_template(
-                "score_resume.html", page="tool_resume", url=url,
+                "score_resume.html", page="tool_resume", url=url, history=_resume_history_view(),
                 error="Не распознал ссылку — нужна прямая ссылка на резюме hh.ru (hh.ru/resume/<hash>).",
             )
         try:
             text = fetch_resume_text(url, cfg["hh"]["user_agent"])
         except ResumeFetchError as e:
             return render_template(
-                "score_resume.html", page="tool_resume", url=url, error=f"Не удалось получить резюме: {e}",
+                "score_resume.html", page="tool_resume", url=url, history=_resume_history_view(),
+                error=f"Не удалось получить резюме: {e}",
             )
         try:
             provider = get_provider(cfg, "tailor", storage)
             result = score_resume(provider, text, career_state["text"])
             storage.record_token_usage(provider.name, "tailor", provider.last_usage)
         except SystemExit as e:
-            return render_template("score_resume.html", page="tool_resume", url=url, error=str(e))
+            return render_template(
+                "score_resume.html", page="tool_resume", url=url, history=_resume_history_view(), error=str(e),
+            )
         except Exception as e:  # noqa: BLE001 — единичный вызов модели, не фоновый прогон со своим протоколом ошибок
-            return render_template("score_resume.html", page="tool_resume", url=url, error=str(e))
-        return render_template("score_resume.html", page="tool_resume", url=url, result=result)
+            return render_template(
+                "score_resume.html", page="tool_resume", url=url, history=_resume_history_view(), error=str(e),
+            )
+
+        storage.save_resume_score(resume_hash, url, result)
+        prior_attempts = storage.resume_score_history(resume_hash)  # [0] — только что сохранённая
+        progress = None
+        if (
+            len(prior_attempts) > 1
+            and prior_attempts[0]["overall_score"] is not None
+            and prior_attempts[1]["overall_score"] is not None
+        ):
+            progress = prior_attempts[0]["overall_score"] - prior_attempts[1]["overall_score"]
+        return render_template(
+            "score_resume.html", page="tool_resume", url=url, result=result,
+            attempt_number=len(prior_attempts), progress=progress, history=_resume_history_view(),
+        )
 
     return app

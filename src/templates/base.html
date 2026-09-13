@@ -194,6 +194,40 @@
     color: hsl(var(--score-hue) var(--score-saturation) var(--score-lightness));
   }
 
+  /* circular "hero" score gauge (currently just /tool/score-resume) — same
+     hue-driven red/yellow/green ramp as .score, just a ring instead of plain
+     text for a single standout number. The ring fills from 0 on load via a
+     one-shot animation (not perpetual) driven by --score-ring-offset, which
+     the template computes as circumference * (1 - score/100); paused/skipped
+     entirely under reduced-motion. */
+  .score-ring {
+    position: relative; width: 128px; height: 128px;
+    display: inline-flex; align-items: center; justify-content: center;
+  }
+  .score-ring svg { width: 100%; height: 100%; transform: rotate(-90deg); }
+  .score-ring-track { fill: none; stroke: var(--border); stroke-width: 10; }
+  .score-ring-fill {
+    fill: none; stroke-width: 10; stroke-linecap: round;
+    stroke: hsl(var(--score-hue) var(--score-saturation) var(--score-lightness));
+    stroke-dasharray: 326.7;
+    stroke-dashoffset: 326.7;
+    animation: score-ring-fill 1s cubic-bezier(0.16, 1, 0.3, 1) 0.1s forwards;
+  }
+  @keyframes score-ring-fill {
+    to { stroke-dashoffset: var(--score-ring-offset); }
+  }
+  .score-ring-label {
+    position: absolute; display: flex; flex-direction: column; align-items: center; line-height: 1;
+  }
+  .score-ring-value {
+    font-size: 1.9rem; font-weight: 800; font-family: var(--font-mono);
+    color: hsl(var(--score-hue) var(--score-saturation) var(--score-lightness));
+  }
+  .score-ring-max { font-size: 0.7rem; color: var(--text-faint); margin-top: 0.2rem; }
+  @media (prefers-reduced-motion: reduce) {
+    .score-ring-fill { animation: none; stroke-dashoffset: var(--score-ring-offset); }
+  }
+
   /* data tables with a fixed column shape (list.html, score_url.html): column
      widths come from an explicit <colgroup> in the template, not guessed by
      the browser from content. Auto layout kept handing surplus width to
@@ -353,7 +387,7 @@
     <a href="{{ url_for('liked_page') }}" class="{{ 'active' if page == 'liked' }}">Подходит{% if nav_counts %} <span id="nav-count-fit">({{ nav_counts.fit }})</span>{% endif %}</a>
     <a href="{{ url_for('archive_page') }}" class="{{ 'active' if page == 'archive' }}">Архив{% if nav_counts %} <span id="nav-count-not_fit">({{ nav_counts.not_fit }})</span>{% endif %}</a>
     <a href="{{ url_for('score_url_form') }}" class="{{ 'active' if page == 'tool' }}">Вакансия по ссылке</a>
-    <a href="{{ url_for('score_resume_form') }}" class="{{ 'active' if page == 'tool_resume' }}">Резюме по ссылке</a>
+    <a href="{{ url_for('score_resume_form') }}" class="{{ 'active' if page == 'tool_resume' }}">Оценка резюме</a>
     <a href="{{ url_for('stats_page') }}">Статистика</a>
     <a href="{{ url_for('settings_page') }}" class="{{ 'active' if page == 'settings' }}"
        {% if update_available %}style="font-weight:800;" title="Доступна новая версия"{% endif %}>Настройки{% if update_available %} (!){% endif %}</a>

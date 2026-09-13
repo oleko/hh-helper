@@ -106,6 +106,21 @@ CREATE TABLE IF NOT EXISTS pipeline_runs (
     done         INTEGER DEFAULT 0,
     message      TEXT
 );
+
+-- история оценок резюме (см. /tool/score-resume) — каждая отправка ссылки
+-- добавляет строку, а не перезаписывает: resume_hash группирует повторные
+-- проверки одного и того же резюме для показа прогресса (score сейчас vs.
+-- в прошлый раз), result_json хранит весь ответ модели целиком, чтобы историю
+-- можно было показать без повторного похода к LLM.
+CREATE TABLE IF NOT EXISTS resume_scores (
+    id               INTEGER PRIMARY KEY AUTOINCREMENT,
+    resume_hash      TEXT,
+    url              TEXT,
+    scored_at        TEXT,
+    overall_score    INTEGER,
+    ats_readability  TEXT,
+    result_json      TEXT
+);
 """
 
 # Колонки, добавленные после первого релиза схемы — для уже существующих БД
@@ -381,6 +396,41 @@ class Storage:
             return conn.execute(
                 "SELECT id, name, decision_reason FROM vacancies "
                 "WHERE decision = 'not_fit' AND decision_reason LIKE 'минус-слово: %'"
+            ).fetchall()
+
+    def save_resume_score(self, resume_hash: str, url: str, result: dict) -> None:
+        """Добавляет строку в историю оценок резюме (/tool/score-resume) — не
+        перезаписывает предыдущую оценку этого же резюме (resume_hash), каждая
+        отправка ссылки — новая запись, чтобы можно было показать прогресс."""
+        with self._conn() as conn:
+            conn.execute(
+                "INSERT INTO resume_scores (resume_hash, url, scored_at, overall_score, "
+                "ats_readability, result_json) VALUES (?, ?, ?, ?, ?, ?)",
+                (
+                    resume_hash,
+                    url,
+                    now_iso(),
+                    result.get("overall_score"),
+                    result.get("ats_readability"),
+                    json.dumps(result, ensure_ascii=False),
+                ),
+            )
+
+    def resume_score_history(self, resume_hash: str, limit: int = 20) -> list[sqlite3.Row]:
+        """Все прошлые оценки ОДНОГО резюме (самые новые первыми) — для расчёта
+        прогресса (score сейчас vs. в прошлый раз)."""
+        with self._conn() as conn:
+            return conn.execute(
+                "SELECT * FROM resume_scores WHERE resume_hash = ? ORDER BY id DESC LIMIT ?",
+                (resume_hash, limit),
+            ).fetchall()
+
+    def list_resume_scores(self, limit: int = 100) -> list[sqlite3.Row]:
+        """Все оценки резюме по всем ссылкам (самые новые первыми) — для общей
+        истории «что и когда оценивали» на /tool/score-resume."""
+        with self._conn() as conn:
+            return conn.execute(
+                "SELECT * FROM resume_scores ORDER BY id DESC LIMIT ?", (limit,)
             ).fetchall()
 
     def record_token_usage(self, provider: str, task: str, usage: dict | None) -> None:

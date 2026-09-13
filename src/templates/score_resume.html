@@ -1,14 +1,15 @@
 {% extends "base.html" %}
-{% block title %}Резюме по ссылке — hh-helper{% endblock %}
+{% block title %}Оценка резюме — hh-helper{% endblock %}
 {% block content %}
-<h2>Резюме по ссылке</h2>
+<h2>Оценка резюме</h2>
 <p class="muted" style="font-size:0.92rem;">Вставь прямую ссылку на резюме с hh.ru (hh.ru/resume/&lt;hash&gt;) — своё
-или чужое, если оценивать нужно не своё. Резюме должно быть отмечено «видно всем компаниям» в настройках
-видимости на hh.ru: инструмент читает публичную страницу резюме напрямую, без входа в личный аккаунт
+или чужое, если оценивать нужно не своё. В настройках видимости резюме на hh.ru должен быть выбран режим
+«Видно по прямой ссылке» (или более открытый) — инструмент читает публичную страницу резюме напрямую, без входа в личный аккаунт
 (полноценная OAuth-авторизация — отдельная большая задача, для приватных резюме это единственный способ,
 пока её нет). Модель оценивает структуру и ATS-читаемость резюме и, если заполнена карьерная база,
 дополнительно сверяет его с реальными достижениями из базы — какие подтверждённые цифры и факты туда
-не попали. Ничего не сохраняется — результат считается заново при каждой отправке.</p>
+не попали. Каждая проверка сохраняется в историю ниже — отправишь ту же ссылку ещё раз после правок
+на hh.ru, увидишь, насколько вырос score с прошлого раза.</p>
 
 {% if error %}
 <p class="flags">⚠ {{ error }}</p>
@@ -23,12 +24,48 @@
 </form>
 
 {% if result %}
-<div class="chart-wrap" style="margin-bottom:1rem;">
-  <p style="display:flex; align-items:center; gap:0.6rem; margin-bottom:0.3rem;">
-    <span class="score" style="font-size:1.4rem;{% if result.overall_score is not none %} --score-hue: {{ result.overall_score * 1.2 }};{% endif %}">{{ result.overall_score if result.overall_score is not none else "?" }}</span>
-    <span class="muted">/ 100</span>
-    <span class="chip chip-neutral">ATS-читаемость: {{ result.ats_readability or "—" }}</span>
-  </p>
+{% if result.resume_title %}<h3 style="margin-bottom:0.6rem;">{{ result.resume_title }}</h3>{% endif %}
+<div class="chart-wrap" style="margin-bottom:1rem; display:flex; align-items:center; gap:1.2rem; flex-wrap:wrap;">
+  {% if result.overall_score is not none %}
+  {% set offset = (326.7 * (1 - result.overall_score / 100)) | round(2) %}
+  <div class="score-ring" style="--score-hue: {{ result.overall_score * 1.2 }}; --score-ring-offset: {{ offset }};">
+    <svg viewBox="0 0 120 120">
+      <circle class="score-ring-track" cx="60" cy="60" r="52"></circle>
+      <circle class="score-ring-fill" cx="60" cy="60" r="52"></circle>
+    </svg>
+    <div class="score-ring-label">
+      <span class="score-ring-value">{{ result.overall_score }}</span>
+      <span class="score-ring-max">/ 100</span>
+    </div>
+  </div>
+  {% else %}
+  <div class="score-ring">
+    <svg viewBox="0 0 120 120">
+      <circle class="score-ring-track" cx="60" cy="60" r="52"></circle>
+    </svg>
+    <div class="score-ring-label">
+      <span class="score-ring-value">?</span>
+      <span class="score-ring-max">/ 100</span>
+    </div>
+  </div>
+  {% endif %}
+  <div>
+    <p style="margin:0 0 0.3rem;"><span class="chip chip-neutral">ATS-читаемость: {{ result.ats_readability or "—" }}</span></p>
+    <p style="margin:0;">
+      {% if attempt_number and attempt_number > 1 %}
+        <span class="chip chip-neutral">Попытка {{ attempt_number }}</span>
+        {% if progress is not none %}
+          {% if progress > 0 %}<span class="badge badge-fit">+{{ progress }} с прошлой проверки</span>
+          {% elif progress < 0 %}<span class="badge badge-not_fit">{{ progress }} с прошлой проверки</span>
+          {% else %}<span class="badge badge-skip">без изменений с прошлой проверки</span>{% endif %}
+        {% else %}
+          <span class="muted">прошлую оценку не с чем сравнить</span>
+        {% endif %}
+      {% else %}
+        <span class="chip chip-neutral">Первая проверка этого резюме</span>
+      {% endif %}
+    </p>
+  </div>
 </div>
 
 {% if result.strengths %}
@@ -73,5 +110,34 @@
   <p class="flags" style="margin:0;">{{ result.red_flags | join(", ") }}</p>
 </div>
 {% endif %}
+{% endif %}
+
+<h3>История проверок</h3>
+{% if not history %}
+<p class="muted">Пока ничего не проверяли этим инструментом.</p>
+{% else %}
+<div class="chart-wrap flush">
+<table class="table-fixed">
+  <colgroup>
+    <col style="width:16%">
+    <col style="width:44%">
+    <col style="width:12%">
+    <col style="width:28%">
+  </colgroup>
+  <thead>
+    <tr><th>Дата</th><th>Резюме</th><th>Score</th><th>ATS</th></tr>
+  </thead>
+  <tbody>
+  {% for h in history %}
+    <tr>
+      <td class="muted">{{ (h.scored_at or '')[:16] | replace('T', ' ') }}</td>
+      <td><a href="{{ h.url }}" target="_blank" rel="noopener">{{ h.resume_title }}</a></td>
+      <td class="score"{% if h.overall_score is not none %} style="--score-hue: {{ h.overall_score * 1.2 }};"{% endif %}>{{ h.overall_score if h.overall_score is not none else "?" }}</td>
+      <td class="muted">{{ h.ats_readability or "—" }}</td>
+    </tr>
+  {% endfor %}
+  </tbody>
+</table>
+</div>
 {% endif %}
 {% endblock %}
